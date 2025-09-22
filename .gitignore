@@ -1,0 +1,23 @@
+# secrets & env
+.env
+*.env
+
+# certs / keys
+certs/
+*.crt
+*.key
+*.pem
+*.p12
+*.jks
+
+# postgres data
+postgres/pgdata/
+
+# python / misc
+__pycache__/
+*.pyc
+*.log
+.vscode/
+.idea/
+.DS_Store
+

@@ -1,0 +1,49 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: pg-confmgr
+    user: "0:0"                         # run wrapper as root to chown certs
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports: ["5432:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./postgres/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - ./postgres/pg_ident.conf:/etc/postgresql/pg_ident.conf:ro
+      - ./postgres/initdb:/docker-entrypoint-initdb.d:ro
+      - ./postgres/entrypoint.sh:/entrypoint.sh:ro
+      - ./certs:/certs:ro 
+    entrypoint: ["/bin/bash","/entrypoint.sh"]
+    healthcheck:
+      test: ["CMD-SHELL","gosu postgres pg_isready -h /var/run/postgresql"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    build: ./backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+    - .env             
+    environment:
+      API_KEY: "dev-secret-api-key"        
+      PGHOST: postgres
+      PGUSER: confmgr_db
+      PGDATABASE: postgres
+      PGSSLMODE: verify-full
+      PGSSLROOTCERT: /run/certs/ca.crt
+      PGSSLCERT: /run/certs/client.crt
+      PGSSLKEY: /run/certs/client.key
+    volumes:
+      - ./certs/ca.crt:/run/certs/ca.crt:ro
+      - ./certs/client.crt:/run/certs/client.crt:ro
+      - ./certs/client.key:/run/certs/client.key:ro
+    ports:
+      - "8080:8080"
+
+volumes:
+  pgdata: {}
