@@ -33,8 +33,7 @@ services:
         condition: service_healthy
     env_file:
     - .env             
-    environment:
-      API_KEY: "dev-secret-api-key"        
+    environment:        
       PGHOST: postgres
       PGUSER: confmgr_db
       PGDATABASE: postgres
@@ -48,6 +47,7 @@ services:
       - ./certs/client.key:/run/certs/client.key:ro
     ports:
       - "8080:8080"
+    restart: unless-stopped
 
 volumes:
   pgdata: {}

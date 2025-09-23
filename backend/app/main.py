@@ -1,28 +1,41 @@
 # app/main.py
 import os
-from fastapi import FastAPI, HTTPException, Header, Depends, Path, Query
+import re
+import json
+import hashlib
+import uuid
+
+from fastapi import FastAPI, HTTPException, Header, Depends, Query
+from fastapi.middleware.cors import CORSMiddleware
+
 from psycopg.rows import dict_row
 from psycopg.types.json import Json
-from fastapi.middleware.cors import CORSMiddleware
-import json, hashlib, uuid, re
 
 from .db import pool
-from .auth import require_api_key
+from .auth import require_api_key            # uses API_KEY from env in auth.py
 from .crypto import seal, open_sealed
 from .models import PutConfigIn, ConfigOut, PutSecretIn, SecretOut
 
 app = FastAPI(title="confmgr-backend")
 
-# Read allowed origins from env; for dev use http://localhost:3000
+# ---------- CORS ----------
+# Read allowed origins from env; for dev: http://localhost:3000
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000")
 origins = [o.strip() for o in CORS_ORIGINS.split(",") if o.strip()]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,          # set explicit origins (no "*")
-    allow_credentials=True,         # allow cookies/Auth if needed
-    allow_methods=["*"],            # or limit to ["GET","POST"]
-    allow_headers=["*"],            # or list: ["Content-Type","X-API-Key"]
+    allow_origins=origins,                # explicit origins (no "*")
+    allow_credentials=True,               # allow cookies/auth if needed
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=[
+        "Content-Type",
+        "Authorization",
+        "X-API-Key",
+        "X-Actor-Id",
+        "X-Actor-Subject",
+    ],
+)
 
 # ---------- Health ----------
 @app.get("/health")
@@ -90,6 +103,7 @@ def put_config(
     path: str,
     payload: PutConfigIn,
     x_actor_id: str | None = Header(default=None, alias="X-Actor-Id"),
+    x_actor_subject: str | None = Header(default=None, alias="X-Actor-Subject"),
 ):
     path = normalize_path(path)
     value = payload.value
@@ -130,6 +144,18 @@ def put_config(
             returning version, created_at
         """, (Json(value), checksum, created_by, path))
         row = cur.fetchone()
+
+        # Audit log
+        cur.execute("""
+            select audit.log_event(%s::uuid, %s::text, %s::text, %s::text, %s::jsonb)
+        """, (
+            created_by,
+            (x_actor_subject or "api_key"),
+            "config.put",
+            path,
+            Json({"version": row["version"]}),
+        ))
+
         conn.commit()
 
     return {"path": path, "version": row["version"], "value": value, "created_at": row["created_at"].isoformat()}
@@ -194,6 +220,7 @@ def put_secret(
     path: str,
     payload: PutSecretIn,
     x_actor_id: str | None = Header(default=None, alias="X-Actor-Id"),
+    x_actor_subject: str | None = Header(default=None, alias="X-Actor-Subject"),
 ):
     path = normalize_path(path)
     value = payload.value
@@ -233,6 +260,18 @@ def put_secret(
             returning version, created_at
         """, (item_id, next_ver, ct, nonce, created_by))
         ver_row = cur.fetchone()
+
+        # Audit log
+        cur.execute("""
+            select audit.log_event(%s::uuid, %s::text, %s::text, %s::text, %s::jsonb)
+        """, (
+            created_by,
+            (x_actor_subject or "api_key"),
+            "secret.put",
+            path,
+            Json({"version": ver_row["version"]}),
+        ))
+
         conn.commit()
 
     return {
@@ -241,3 +280,4 @@ def put_secret(
         "value": value,
         "created_at": ver_row["created_at"].isoformat(),
     }
+# ===================== END =====================
