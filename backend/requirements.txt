@@ -4,4 +4,4 @@ psycopg[binary]==3.2.*
 pydantic==2.*
 cryptography==43.*
 psycopg-pool==3.2.*
-
+PyJWT>=2.9

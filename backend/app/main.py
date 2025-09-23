@@ -12,14 +12,26 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Json
 
 from .db import pool
-from .auth import require_api_key            # uses API_KEY from env in auth.py
+# Auth: API-key for now; later we can switch require_* to JWT without touching handlers
+from .auth import require_api_key, require_bearer, AuthPrincipal, resolve_created_by
 from .crypto import seal, open_sealed
 from .models import PutConfigIn, ConfigOut, PutSecretIn, SecretOut
+
+# choose auth mode once at startup
+AUTH_TYPE = os.getenv("AUTH_TYPE", "API_KEY").strip().upper()
+if AUTH_TYPE == "API_KEY":
+    AUTH_DEP = require_api_key
+elif AUTH_TYPE == "BEARER":
+    AUTH_DEP = require_bearer
+else:
+    raise RuntimeError(f"Invalid AUTH_TYPE '{AUTH_TYPE}'. Expected 'API_KEY' or 'BEARER'.")
+
+
 
 app = FastAPI(title="confmgr-backend")
 
 # ---------- CORS ----------
-# Read allowed origins from env; for dev: http://localhost:3000
+# Allowed origins (comma-separated). Dev default: http://localhost:3000
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000")
 origins = [o.strip() for o in CORS_ORIGINS.split(",") if o.strip()]
 
@@ -40,14 +52,14 @@ app.add_middleware(
 # ---------- Health ----------
 @app.get("/health")
 def health():
-    # Simple DB round-trip to prove connectivity and time source
+    """Simple DB round-trip to prove connectivity and time source."""
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute("select now()")
         return {"status": "ok", "db_time_utc": cur.fetchone()[0].isoformat()}
 
 @app.get("/healthz")
 def healthz():
-    # Alias commonly used by probes
+    """Alias commonly used by probes."""
     return health()
 
 # ---------- Path normalization / validation ----------
@@ -71,9 +83,11 @@ def normalize_path(p: str) -> str:
 @app.get(
     "/config/{path:path}",
     response_model=ConfigOut,
-    dependencies=[Depends(require_api_key)]
 )
-def get_config(path: str):
+def get_config(
+    path: str,
+    principal: AuthPrincipal | None = Depends(AUTH_DEP),
+):
     path = normalize_path(path)
     sql = """
     select cv.version, cv.value_json, cv.created_at
@@ -97,13 +111,13 @@ def get_config(path: str):
     "/config/{path:path}",
     response_model=ConfigOut,
     status_code=201,
-    dependencies=[Depends(require_api_key)]
 )
 def put_config(
     path: str,
     payload: PutConfigIn,
     x_actor_id: str | None = Header(default=None, alias="X-Actor-Id"),
     x_actor_subject: str | None = Header(default=None, alias="X-Actor-Subject"),
+    principal: AuthPrincipal | None = Depends(AUTH_DEP),
 ):
     path = normalize_path(path)
     value = payload.value
@@ -111,7 +125,7 @@ def put_config(
     # Canonical JSON for deterministic checksum
     value_canon = json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
     checksum = hashlib.sha256(value_canon).digest()
-    created_by = uuid.UUID(x_actor_id) if x_actor_id else uuid.UUID("00000000-0000-0000-0000-000000000001")
+    created_by = resolve_created_by(principal, x_actor_id)
 
     with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
         # Ensure item exists
@@ -145,12 +159,19 @@ def put_config(
         """, (Json(value), checksum, created_by, path))
         row = cur.fetchone()
 
+        # Derive actor_subject (JWT > header > fallback)
+        actor_subject = (
+            x_actor_subject
+            or (principal.subject if principal else None)
+            or ("bearer" if AUTH_TYPE == "BEARER" else "api_key")
+        )
+
         # Audit log
         cur.execute("""
             select audit.log_event(%s::uuid, %s::text, %s::text, %s::text, %s::jsonb)
         """, (
             created_by,
-            (x_actor_subject or "api_key"),
+            actor_subject,
             "config.put",
             path,
             Json({"version": row["version"]}),
@@ -165,11 +186,11 @@ def put_config(
 @app.get(
     "/secret/{path:path}",
     response_model=SecretOut,
-    dependencies=[Depends(require_api_key)]
 )
 def get_secret(
     path: str,
     version: int | None = Query(default=None, description="Optional explicit version"),
+    principal: AuthPrincipal | None = Depends(AUTH_DEP),
 ):
     path = normalize_path(path)
     # Either fetch explicit version, or the current one
@@ -214,17 +235,17 @@ def get_secret(
     "/secret/{path:path}",
     response_model=SecretOut,
     status_code=201,
-    dependencies=[Depends(require_api_key)]
 )
 def put_secret(
     path: str,
     payload: PutSecretIn,
     x_actor_id: str | None = Header(default=None, alias="X-Actor-Id"),
     x_actor_subject: str | None = Header(default=None, alias="X-Actor-Subject"),
+    principal: AuthPrincipal | None = Depends(AUTH_DEP),
 ):
     path = normalize_path(path)
     value = payload.value
-    created_by = uuid.UUID(x_actor_id) if x_actor_id else uuid.UUID("00000000-0000-0000-0000-000000000001")
+    created_by = resolve_created_by(principal, x_actor_id)
 
     # Canonical plaintext for deterministic crypto
     plaintext = json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
@@ -261,12 +282,15 @@ def put_secret(
         """, (item_id, next_ver, ct, nonce, created_by))
         ver_row = cur.fetchone()
 
+        # Derive actor_subject (JWT > header > fallback)
+        actor_subject = x_actor_subject or (principal.subject if principal else None) or "api_key"
+
         # Audit log
         cur.execute("""
             select audit.log_event(%s::uuid, %s::text, %s::text, %s::text, %s::jsonb)
         """, (
             created_by,
-            (x_actor_subject or "api_key"),
+            actor_subject,
             "secret.put",
             path,
             Json({"version": ver_row["version"]}),
@@ -280,4 +304,5 @@ def put_secret(
         "value": value,
         "created_at": ver_row["created_at"].isoformat(),
     }
+
 # ===================== END =====================
