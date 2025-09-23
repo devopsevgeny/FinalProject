@@ -1,7 +1,9 @@
 # app/main.py
+import os
 from fastapi import FastAPI, HTTPException, Header, Depends, Path, Query
 from psycopg.rows import dict_row
 from psycopg.types.json import Json
+from fastapi.middleware.cors import CORSMiddleware
 import json, hashlib, uuid, re
 
 from .db import pool
@@ -10,6 +12,17 @@ from .crypto import seal, open_sealed
 from .models import PutConfigIn, ConfigOut, PutSecretIn, SecretOut
 
 app = FastAPI(title="confmgr-backend")
+
+# Read allowed origins from env; for dev use http://localhost:3000
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000")
+origins = [o.strip() for o in CORS_ORIGINS.split(",") if o.strip()]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,          # set explicit origins (no "*")
+    allow_credentials=True,         # allow cookies/Auth if needed
+    allow_methods=["*"],            # or limit to ["GET","POST"]
+    allow_headers=["*"],            # or list: ["Content-Type","X-API-Key"]
 
 # ---------- Health ----------
 @app.get("/health")
@@ -186,39 +199,33 @@ def put_secret(
     value = payload.value
     created_by = uuid.UUID(x_actor_id) if x_actor_id else uuid.UUID("00000000-0000-0000-0000-000000000001")
 
-    # Prepare canonical plaintext for encryption
+    # Canonical plaintext for deterministic crypto
     plaintext = json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
 
     with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
-        # 1) Ensure item exists
+        # 1) Ensure parent item exists
         cur.execute("""
             insert into core.secret_items(path, created_by)
             values (%s, %s)
             on conflict(path) do nothing
         """, (path, created_by))
 
-        # 2) Get item_id
-        cur.execute("select id from core.secret_items where path = %s", (path,))
+        # 2) Lock the parent row to serialize writers (no FOR UPDATE on aggregates)
+        cur.execute("select id from core.secret_items where path = %s for update", (path,))
         item = cur.fetchone()
         if not item:
             raise HTTPException(500, "Secret item not created")
         item_id = item["id"]
 
-        # 3) Compute next version atomically and lock the version space
-        cur.execute("""
-            select coalesce(max(version), 0) + 1 as next_ver
-            from core.secret_versions
-            where item_id = %s
-            for update
-        """, (item_id,))
-        next_ver = cur.fetchone()["next_ver"]
+        # 3) Compute next version under the parent lock
+        cur.execute("select coalesce(max(version), 0) as mv from core.secret_versions where item_id = %s", (item_id,))
+        next_ver = cur.fetchone()["mv"] + 1
 
-        # 4) Encrypt with AAD that *must* match at decrypt time
-        # AAD = path|version prevents ciphertext replay under a different version or path
+        # 4) Encrypt with AAD binding ciphertext to (path|version)
         aad = f"{path}|{next_ver}".encode()
         nonce, ct = seal(plaintext, aad=aad)
 
-        # 5) Flip current and insert the new version as current
+        # 5) Flip current and insert the new current version atomically
         cur.execute("update core.secret_versions set is_current = false where item_id = %s and is_current", (item_id,))
         cur.execute("""
             insert into core.secret_versions(item_id, version, is_current, ciphertext, nonce, alg, created_by)
