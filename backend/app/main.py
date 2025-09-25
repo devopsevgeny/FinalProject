@@ -12,10 +12,13 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Json
 
 from .db import pool
-# Auth: API-key for now; later we can switch require_* to JWT without touching handlers
+# Auth: API-key or JWT, выбирается один раз на старте
 from .auth import require_api_key, require_bearer, AuthPrincipal, resolve_created_by
 from .crypto import seal, open_sealed
 from .models import PutConfigIn, ConfigOut, PutSecretIn, SecretOut
+from .logging_config import setup_logging
+
+setup_logging()
 
 # choose auth mode once at startup
 AUTH_TYPE = os.getenv("AUTH_TYPE", "API_KEY").strip().upper()
@@ -25,8 +28,6 @@ elif AUTH_TYPE == "BEARER":
     AUTH_DEP = require_bearer
 else:
     raise RuntimeError(f"Invalid AUTH_TYPE '{AUTH_TYPE}'. Expected 'API_KEY' or 'BEARER'.")
-
-
 
 app = FastAPI(title="confmgr-backend")
 
@@ -62,6 +63,31 @@ def healthz():
     """Alias commonly used by probes."""
     return health()
 
+# Диагностический эндпоинт. Использует уже выбранную зависимость AUTH_DEP.
+@app.get("/__whoami")
+def __whoami(principal: AuthPrincipal = Depends(AUTH_DEP)):  # Remove None type
+    return {
+        "auth_type": AUTH_TYPE,
+        "principal": {
+            "id": principal.id,  # Direct access instead of getattr
+            "subject": principal.subject,
+            "issuer": principal.issuer,
+            "scopes": principal.scopes,
+        }
+    }
+
+@app.get("/whoami")
+def whoami(principal: AuthPrincipal = Depends(AUTH_DEP)):  # Remove None type
+    return {
+        "auth_type": AUTH_TYPE,
+        "principal": {
+            "id": principal.id,  # Direct access instead of getattr
+            "subject": principal.subject,
+            "issuer": principal.issuer,
+            "scopes": principal.scopes,
+        }
+    }
+
 # ---------- Path normalization / validation ----------
 PATH_RE = re.compile(r"^(?:[A-Za-z0-9._-]+)(?:/[A-Za-z0-9._-]+)*$")
 
@@ -86,7 +112,7 @@ def normalize_path(p: str) -> str:
 )
 def get_config(
     path: str,
-    principal: AuthPrincipal | None = Depends(AUTH_DEP),
+    principal: AuthPrincipal = Depends(AUTH_DEP)  # Remove None type
 ):
     path = normalize_path(path)
     sql = """
@@ -117,7 +143,7 @@ def put_config(
     payload: PutConfigIn,
     x_actor_id: str | None = Header(default=None, alias="X-Actor-Id"),
     x_actor_subject: str | None = Header(default=None, alias="X-Actor-Subject"),
-    principal: AuthPrincipal | None = Depends(AUTH_DEP),
+    principal: AuthPrincipal = Depends(AUTH_DEP)  # Remove None type
 ):
     path = normalize_path(path)
     value = payload.value
@@ -190,7 +216,7 @@ def put_config(
 def get_secret(
     path: str,
     version: int | None = Query(default=None, description="Optional explicit version"),
-    principal: AuthPrincipal | None = Depends(AUTH_DEP),
+    principal: AuthPrincipal = Depends(AUTH_DEP)  # Remove None type
 ):
     path = normalize_path(path)
     # Either fetch explicit version, or the current one
@@ -241,7 +267,7 @@ def put_secret(
     payload: PutSecretIn,
     x_actor_id: str | None = Header(default=None, alias="X-Actor-Id"),
     x_actor_subject: str | None = Header(default=None, alias="X-Actor-Subject"),
-    principal: AuthPrincipal | None = Depends(AUTH_DEP),
+    principal: AuthPrincipal = Depends(AUTH_DEP)  # Remove None type
 ):
     path = normalize_path(path)
     value = payload.value
@@ -283,7 +309,7 @@ def put_secret(
         ver_row = cur.fetchone()
 
         # Derive actor_subject (JWT > header > fallback)
-        actor_subject = x_actor_subject or (principal.subject if principal else None) or "api_key"
+        actor_subject = x_actor_subject or (principal.subject if principal else None) or ("bearer" if AUTH_TYPE == "BEARER" else "api_key")
 
         # Audit log
         cur.execute("""

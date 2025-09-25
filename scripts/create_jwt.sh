@@ -33,4 +33,5 @@ PY
 )
 
 echo "JWT: $TOKEN"
+# Note: 'export TOKEN' will only persist in the parent shell if this script is sourced (e.g., 'source create_jwt.sh' or '. create_jwt.sh')
 export TOKEN

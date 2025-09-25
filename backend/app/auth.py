@@ -1,104 +1,88 @@
-# app/auth.py
-import os, uuid, json, time, hmac, hashlib, base64
+import os
+import logging
 from dataclasses import dataclass
+from typing import Optional
 from fastapi import Header, HTTPException
 
-# ---- JWT config (HS256) ----
-JWT_ALG = os.getenv("JWT_ALG", "HS256")
-JWT_KEY = os.getenv("JWT_SIGNING_KEY", "")
-JWT_ISS = os.getenv("ISSUER", "confmgr")
-JWT_AUD = os.getenv("JWT_AUDIENCE", "confmgr")
+import jwt  # PyJWT
 
-# ---- API key (dev/temporary) ----
+logger = logging.getLogger(__name__)
+
+AUTH_TYPE = os.getenv("AUTH_TYPE", "API_KEY").strip().upper()
+
+# API Key
 API_KEY = os.getenv("API_KEY", "")
+
+# JWT params
+JWT_ALG = os.getenv("JWT_ALG", "HS256")
+JWT_SIGNING_KEY = os.getenv("JWT_SIGNING_KEY", "")
+JWT_AUDIENCE = os.getenv("JWT_AUDIENCE", "confmgr")
+ISSUER = os.getenv("ISSUER", "")
 
 @dataclass
 class AuthPrincipal:
-    id: str | None = None       # sub
-    subject: str | None = None  # preferred_username/name/email
-    issuer: str | None = None   # iss
-    scopes: list[str] | None = None
+    """Represents an authenticated principal"""
+    id: str
+    subject: Optional[str] = None
+    issuer: Optional[str] = None
+    scopes: Optional[list[str]] = None
 
-SYSTEM_PRINCIPAL = uuid.UUID(os.getenv(
-    "SYSTEM_PRINCIPAL_ID",
-    "00000000-0000-0000-0000-000000000001"
-))
+def _unauth(detail: str):
+    logger.warning("Auth failed: %s", detail)
+    raise HTTPException(status_code=401, detail="Unauthorized")
 
-# --- helpers ---
-def _b64url_decode(seg: str) -> bytes:
-    pad = '=' * ((4 - len(seg) % 4) % 4)
-    return base64.urlsafe_b64decode(seg + pad)
+def _require_api_key(x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> AuthPrincipal:
+    if not API_KEY:
+        _unauth("API_KEY not configured")
+    if not x_api_key:
+        _unauth("Missing X-API-Key header")
+    if x_api_key != API_KEY:
+        _unauth("Invalid API key")
+    return AuthPrincipal(id="api-key")
 
-def _verify_hs256_jwt(token: str) -> AuthPrincipal:
-    try:
-        head_b64, payload_b64, sig_b64 = token.split('.', 2)
-        header = json.loads(_b64url_decode(head_b64))
-        payload = json.loads(_b64url_decode(payload_b64))
-        sig = _b64url_decode(sig_b64)
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid token format")
-
-    if header.get("alg") != "HS256" or JWT_ALG != "HS256":
-        raise HTTPException(status_code=401, detail="Unsupported JWT alg")
-
-    if not JWT_KEY:
-        raise HTTPException(status_code=500, detail="JWT key not configured")
-
-    signing = f"{head_b64}.{payload_b64}".encode()
-    expected = hmac.new(JWT_KEY.encode(), signing, hashlib.sha256).digest()
-    if not hmac.compare_digest(expected, sig):
-        raise HTTPException(status_code=401, detail="Bad token signature")
-
-    now = int(time.time())
-    iss = payload.get("iss")
-    aud = payload.get("aud")
-    exp = payload.get("exp")
-    nbf = payload.get("nbf", 0)
-
-    if JWT_ISS and iss != JWT_ISS:
-        raise HTTPException(status_code=401, detail="Bad token issuer")
-    if JWT_AUD and aud != JWT_AUD:
-        raise HTTPException(status_code=401, detail="Bad token audience")
-    if not isinstance(exp, int) or exp <= now:
-        raise HTTPException(status_code=401, detail="Token expired")
-    if isinstance(nbf, int) and nbf > now:
-        raise HTTPException(status_code=401, detail="Token not yet valid")
-
-    sub = payload.get("sub")
-    subj = payload.get("preferred_username") or payload.get("name") or payload.get("email")
-    scopes = payload.get("scope")
-    if isinstance(scopes, str):
-        scopes = scopes.split()
-
-    return AuthPrincipal(id=sub, subject=subj, issuer=iss, scopes=scopes)
-
-# --- API-Key only guard (dev) ---
-def require_api_key(x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> AuthPrincipal | None:
-    if not API_KEY or x_api_key != API_KEY:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    return None  # no identity in API-key mode
-
-# --- Bearer-only guard (prod) ---
-def require_bearer(authorization: str | None = Header(default=None, alias="Authorization")) -> AuthPrincipal:
+def _require_bearer(authorization: str | None = Header(default=None)) -> AuthPrincipal:
     if not authorization:
-        raise HTTPException(status_code=401, detail="Missing Authorization header")
-    scheme, _, token = authorization.partition(' ')
-    if scheme.lower() != "bearer" or not token:
-        raise HTTPException(status_code=401, detail="Invalid Authorization scheme")
-    return _verify_hs256_jwt(token)
+        _unauth("Missing Authorization header")
+    parts = authorization.split()
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        _unauth("Malformed Authorization header")
 
-def resolve_created_by(principal: AuthPrincipal | None, x_actor_id: str | None) -> uuid.UUID:
-    # Prefer JWT 'sub'
-    if principal and principal.id:
-        try:
-            return uuid.UUID(principal.id)
-        except ValueError:
-            pass
-    # Fallback to header
+    token = parts[1]
+    try:
+        payload = jwt.decode(
+            token,
+            JWT_SIGNING_KEY,
+            algorithms=[JWT_ALG],
+            audience=JWT_AUDIENCE,
+            issuer=ISSUER,
+            leeway=30,
+            options={"require": ["exp", "iat", "sub"]},
+        )
+        return AuthPrincipal(
+            id=payload["sub"],
+            subject=payload.get("sub"),
+            issuer=payload.get("iss"),
+            scopes=payload.get("scope", "").split() if "scope" in payload else None
+        )
+    except jwt.ExpiredSignatureError:
+        _unauth("Token expired")
+    except jwt.InvalidAudienceError:
+        _unauth("Bad audience")
+    except jwt.InvalidIssuerError:
+        _unauth("Bad issuer")
+    except jwt.InvalidSignatureError:
+        _unauth("Bad signature")
+    except jwt.PyJWTError as e:
+        _unauth(f"JWT error: {e}")
+
+def resolve_created_by(principal: AuthPrincipal, x_actor_id: str | None) -> str:
+    """Resolve the created_by ID from principal or X-Actor-Id header"""
     if x_actor_id:
-        try:
-            return uuid.UUID(x_actor_id)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="X-Actor-Id must be a UUID")
-    # Final fallback
-    return SYSTEM_PRINCIPAL
+        return x_actor_id
+    return principal.id if principal else "system"
+
+# Export the public interface
+require_api_key = _require_api_key
+require_bearer = _require_bearer
+
+__all__ = ["require_api_key", "require_bearer", "AuthPrincipal", "resolve_created_by"]
