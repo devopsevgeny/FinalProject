@@ -1,27 +1,60 @@
-import { Routes, Route, Navigate } from 'react-router-dom'
-import Login from './pages/Login.jsx'
-import Dashboard from './pages/Dashboard.jsx'
-import Secret from './pages/Secret.jsx'
-import ConfigPage from './pages/Config.jsx'
-import UsersPage from './pages/Users.jsx'
-import AuditPage from './pages/Audit.jsx'
-import WhoAmI from './pages/WhoAmI.jsx'
-import AppLayout from './components/AppLayout.jsx'
+import React from 'react';
+import {
+  MDBBtn,
+  MDBContainer,
+  MDBRow,
+  MDBCol,
+  MDBCard,
+  MDBCardBody,
+  MDBInput,
+  MDBIcon
+} from 'mdb-react-ui-kit';
 
-export default function App() {
+function App() {
   return (
-    <Routes>
-      <Route path="/" element={<Login />} />
-      <Route path="/app" element={<AppLayout />}>
-        <Route index element={<Dashboard />} />
-        <Route path="secrets" element={<Secret />} />
-        <Route path="configs" element={<ConfigPage />} />
-        <Route path="users" element={<UsersPage />} />
-        <Route path="audit" element={<AuditPage />} />
-        <Route path="whoami" element={<WhoAmI />} />
-      </Route>
-      <Route path="/whoami" element={<Navigate to="/app/whoami" replace />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
-  )
+    <MDBContainer fluid>
+      <MDBRow
+        className='d-flex justify-content-center align-items-center'
+        style={{ minHeight: '100vh' }}  // чтобы карточка точно была видна и по центру
+      >
+        <MDBCol col='12'>
+          <MDBCard className='bg-dark text-white my-5 mx-auto' style={{ borderRadius: '1rem', maxWidth: '400px' }}>
+            <MDBCardBody className='p-5 d-flex flex-column align-items-center mx-auto w-100'>
+
+              <h2 className="fw-bold mb-2 text-uppercase">Login</h2>
+              <p className="text-white-50 mb-5">Please enter your login and password!</p>
+
+              <MDBInput wrapperClass='mb-4 mx-5 w-100' labelClass='text-white' label='Email address' id='email' type='email' size="lg"/>
+              <MDBInput wrapperClass='mb-4 mx-5 w-100' labelClass='text-white' label='Password' id='password' type='password' size="lg"/>
+
+              <p className="small mb-3 pb-lg-2"><a className="text-white-50" href="#!">Forgot password?</a></p>
+              <MDBBtn outline className='mx-2 px-5' color='white' size='lg'>
+                Login
+              </MDBBtn>
+
+              <div className='d-flex flex-row mt-3 mb-5'>
+                <MDBBtn tag='a' color='none' className='m-3' style={{ color: 'white' }}>
+                  <MDBIcon fab icon='facebook-f' size="lg"/>
+                </MDBBtn>
+                <MDBBtn tag='a' color='none' className='m-3' style={{ color: 'white' }}>
+                  <MDBIcon fab icon='twitter' size="lg"/>
+                </MDBBtn>
+                <MDBBtn tag='a' color='none' className='m-3' style={{ color: 'white' }}>
+                  <MDBIcon fab icon='google' size="lg"/>
+                </MDBBtn>
+              </div>
+
+              <div>
+                <p className="mb-0">Don't have an account? <a href="#!" className="text-white-50 fw-bold">Sign Up</a></p>
+              </div>
+
+            </MDBCardBody>
+          </MDBCard>
+        </MDBCol>
+      </MDBRow>
+    </MDBContainer>
+  );
 }
+
+export default App;
+
