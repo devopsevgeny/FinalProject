@@ -215,8 +215,8 @@ def put_config(
 )
 def get_secret(
     path: str,
-    version: int | None = Query(default=None, description="Optional explicit version"),
-    principal: AuthPrincipal = Depends(AUTH_DEP)  # Remove None type
+    version: int | None = Query(default=None),
+    principal: AuthPrincipal = Depends(AUTH_DEP)
 ):
     path = normalize_path(path)
     # Either fetch explicit version, or the current one
@@ -250,12 +250,14 @@ def get_secret(
         plaintext = open_sealed(row["nonce"], row["ciphertext"], aad=aad)
         value = json.loads(plaintext.decode())
 
-        return {
-            "path": path,
-            "version": row["version"],
-            "value": value,
-            "created_at": row["created_at"].isoformat(),
-        }
+        # Return actual values for GET requests
+        return SecretOut(
+            path=path,
+            version=row["version"],
+            value=value,
+            created_at=row["created_at"].isoformat(),
+            mask_response=False  # Don't mask GET responses
+        )
 
 @app.post(
     "/secret/{path:path}",
@@ -324,11 +326,13 @@ def put_secret(
 
         conn.commit()
 
-    return {
-        "path": path,
-        "version": ver_row["version"],
-        "value": value,
-        "created_at": ver_row["created_at"].isoformat(),
-    }
+    # Mask values only in POST response
+    return SecretOut(
+        path=path,
+        version=ver_row["version"],
+        value=value,
+        created_at=ver_row["created_at"].isoformat(),
+        mask_response=True  # Mask POST responses
+    )
 
 # ===================== END =====================
