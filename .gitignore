@@ -20,4 +20,5 @@ __pycache__/
 .vscode/
 .idea/
 .DS_Store
-
+#Dont ignore 
+!src/types/

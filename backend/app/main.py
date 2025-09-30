@@ -12,11 +12,13 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Json
 
 from .db import pool
-# Auth: API-key or JWT, выбирается один раз на старте
+# Auth: API key or JWT — selected once at startup
 from .auth import require_api_key, require_bearer, AuthPrincipal, resolve_created_by
 from .crypto import seal, open_sealed
 from .models import PutConfigIn, ConfigOut, PutSecretIn, SecretOut
 from .logging_config import setup_logging
+from app.routes import router as routes
+
 
 setup_logging()
 
@@ -49,6 +51,9 @@ app.add_middleware(
         "X-Actor-Subject",
     ],
 )
+
+# Register aggregated routes (e.g., /auth/login)
+app.include_router(routes)
 
 # ---------- Health ----------
 @app.get("/health")
