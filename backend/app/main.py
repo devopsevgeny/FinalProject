@@ -13,7 +13,7 @@ from psycopg.types.json import Json
 
 from .db import pool
 # Auth: API key or JWT — selected once at startup
-from .auth import require_api_key, require_bearer, AuthPrincipal, resolve_created_by
+from .security import require_api_key, require_bearer, AuthPrincipal, resolve_created_by
 from .crypto import seal, open_sealed
 from .models import PutConfigIn, ConfigOut, PutSecretIn, SecretOut
 from .logging_config import setup_logging
