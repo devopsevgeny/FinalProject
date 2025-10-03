@@ -1,10 +1,10 @@
 BEGIN;
 
--- prerequisites
+-- Предварительные настройки
 CREATE SCHEMA IF NOT EXISTS core;
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
--- role enum (create only if missing)
+-- Создание перечисления ролей (если не существует)
 DO $$
 BEGIN
   IF NOT EXISTS (
@@ -18,7 +18,7 @@ BEGIN
   END IF;
 END$$;
 
--- tables
+-- Таблицы
 CREATE TABLE IF NOT EXISTS core.roles (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name core.role_type NOT NULL,
@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS core.user_roles (
   PRIMARY KEY (user_id, role_id)
 );
 
--- trigger to maintain updated_at
+-- Триггер для обновления updated_at
 CREATE OR REPLACE FUNCTION core.update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -60,24 +60,24 @@ CREATE TRIGGER update_users_updated_at
   FOR EACH ROW
   EXECUTE FUNCTION core.update_updated_at_column();
 
--- ensure unique by role name (so seeds are truly idempotent)
+-- Уникальный индекс для ролей
 CREATE UNIQUE INDEX IF NOT EXISTS ux_roles_name ON core.roles(name);
 
--- base roles (now safe due to ux_roles_name)
+-- Базовые роли
 INSERT INTO core.roles (name, description) VALUES
-  ('GLOBAL_ADMIN','Full system access'),
-  ('SECRET_ADMIN','Can manage secrets'),
-  ('USER_ADMIN','Can manage users'),
-  ('CONFIG_ADMIN','Can manage configurations'),
-  ('SECRET_VIEWER','Can view secrets'),
-  ('CONFIG_VIEWER','Can view configurations'),
-  ('USER_VIEWER','Can view users')
+  ('GLOBAL_ADMIN','Полный доступ к системе'),
+  ('SECRET_ADMIN','Может управлять секретами'),
+  ('USER_ADMIN','Может управлять пользователями'),
+  ('CONFIG_ADMIN','Может управлять конфигурациями'),
+  ('SECRET_VIEWER','Может просматривать секреты'),
+  ('CONFIG_VIEWER','Может просматривать конфигурации'),
+  ('USER_VIEWER','Может просматривать пользователей')
 ON CONFLICT DO NOTHING;
 
--- admin user (username: admin, password: admin) with GLOBAL_ADMIN role
-WITH upsert AS (
+-- Пользователь admin с ролью GLOBAL_ADMIN
+WITH upsert_user AS (
   INSERT INTO core.users (username, email, password_hash)
-  VALUES ('admin','admin@example.com', digest('admin','sha256'))
+  VALUES ('admin', 'admin@example.com', digest('admin', 'sha256'))
   ON CONFLICT (username) DO UPDATE
     SET email = EXCLUDED.email,
         password_hash = EXCLUDED.password_hash
@@ -85,12 +85,17 @@ WITH upsert AS (
 )
 INSERT INTO core.user_roles (user_id, role_id, granted_by)
 SELECT u.id, r.id, u.id
-FROM core.users u
+FROM upsert_user u
 JOIN core.roles r ON r.name = 'GLOBAL_ADMIN'
-WHERE u.username = 'admin'
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM core.user_roles ur
+  WHERE ur.user_id = u.id
+    AND ur.role_id = (SELECT id FROM core.roles WHERE name = 'GLOBAL_ADMIN')
+)
 ON CONFLICT DO NOTHING;
 
--- helper: check role
+-- Функция для проверки роли
 CREATE OR REPLACE FUNCTION core.has_role(p_user_id UUID, p_role core.role_type)
 RETURNS BOOLEAN AS $$
 BEGIN
@@ -104,7 +109,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- helpful indexes
+-- Полезные индексы
 CREATE INDEX IF NOT EXISTS idx_user_roles_user_id ON core.user_roles(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_roles_role_id ON core.user_roles(role_id);
 CREATE INDEX IF NOT EXISTS idx_users_email ON core.users(email);
