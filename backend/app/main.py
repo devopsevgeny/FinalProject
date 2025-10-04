@@ -68,31 +68,6 @@ def healthz():
     """Alias commonly used by probes."""
     return health()
 
-# Диагностический эндпоинт. Использует уже выбранную зависимость AUTH_DEP.
-@app.get("/__whoami")
-def __whoami(principal: AuthPrincipal = Depends(AUTH_DEP)):  # Remove None type
-    return {
-        "auth_type": AUTH_TYPE,
-        "principal": {
-            "id": principal.id,  # Direct access instead of getattr
-            "subject": principal.subject,
-            "issuer": principal.issuer,
-            "scopes": principal.scopes,
-        }
-    }
-
-@app.get("/whoami")
-def whoami(principal: AuthPrincipal = Depends(AUTH_DEP)):  # Remove None type
-    return {
-        "auth_type": AUTH_TYPE,
-        "principal": {
-            "id": principal.id,  # Direct access instead of getattr
-            "subject": principal.subject,
-            "issuer": principal.issuer,
-            "scopes": principal.scopes,
-        }
-    }
-
 # ---------- Path normalization / validation ----------
 PATH_RE = re.compile(r"^(?:[A-Za-z0-9._-]+)(?:/[A-Za-z0-9._-]+)*$")
 

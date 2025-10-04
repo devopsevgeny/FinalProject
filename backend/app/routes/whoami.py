@@ -1,5 +1,4 @@
-"""Routes for whoami endpoint (roles/scopes)."""
-
+# app/routes/whoami.py
 from fastapi import APIRouter, Depends
 from app.deps import AUTH_TYPE, AUTH_DEP
 from app.security.auth import AuthPrincipal
