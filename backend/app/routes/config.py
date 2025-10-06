@@ -201,34 +201,26 @@ def put_config(
 async def put_config_file(
     path: str,
     file: UploadFile = File(...),
-    app_id: str = Form(...),
-    app_name: str | None = Form(default=None),
+    app_id: str = Form(default="default", alias="appId"),
+    app_name: str | None = Form(default=None, alias="appName"),
+    mime: str | None = Form(default=None),
     x_actor_id: str | None = Header(default=None, alias="X-Actor-Id"),
     x_actor_subject: str | None = Header(default=None, alias="X-Actor-Subject"),
     _principal: AuthPrincipal = Depends(AUTH_DEP),
 ):
-    """Store a config as a file (binary payload kept in versioned table)."""
+    """Upload a file-backed config item (AES-GCM at rest)."""
     path = normalize_path(path)
     app_id = (app_id or "default").strip() or "default"
     app_name = (app_name or "").strip() or None
-    created_by = resolve_created_by(_principal, x_actor_id)
 
     data = await file.read()
-    if not data:
-        raise HTTPException(status_code=400, detail="Uploaded file is empty")
     if len(data) > MAX_FILE_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail=f"File exceeds limit of {MAX_FILE_BYTES} bytes",
-        )
+        raise HTTPException(status_code=400, detail="Config file too large")
+    if ALLOWED_FILE_MIME_PREFIXES and mime:
+        if not any(mime.startswith(prefix) for prefix in ALLOWED_FILE_MIME_PREFIXES):
+            raise HTTPException(status_code=400, detail="Config MIME not allowed")
 
-    mime = (file.content_type or "").lower()
-    if ALLOWED_FILE_MIME_PREFIXES and mime and not mime.startswith(ALLOWED_FILE_MIME_PREFIXES):
-        raise HTTPException(
-            status_code=415,
-            detail="Unsupported file type",
-        )
-
+    created_by = resolve_created_by(_principal, x_actor_id)
     checksum = hashlib.sha256(data).digest()
     safe_name = file.filename or "config.bin"
 

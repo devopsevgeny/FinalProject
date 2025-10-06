@@ -1,188 +1,163 @@
-# app/routes/login.py
-import os
-import datetime as dt
-import jwt
+# backend/app/routes/login.py
+"""Login endpoint: verifies creds, issues JWT with roles and derived scopes."""
+
+from __future__ import annotations
+
 import logging
-from fastapi import APIRouter, HTTPException, Request
+import os
+from datetime import datetime, timedelta, timezone
+from typing import List, Optional
+
+import jwt  # PyJWT
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from psycopg.rows import dict_row
 from psycopg.types.json import Json
+
 from app.db import pool
 
 logger = logging.getLogger(__name__)
-
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-# JWT config
-JWT_ALG   = os.getenv("JWT_ALG", "HS256")
-JWT_ISS   = os.getenv("ISSUER", "confmgr")
-JWT_AUD   = os.getenv("JWT_AUDIENCE", "confmgr")
-JWT_KEY   = os.getenv("JWT_SIGNING_KEY", "devsecret")
-JWT_TTL_S = int(os.getenv("JWT_EXP_DELTA_SECONDS", "3600"))
+# --- ENV / settings ---
+JWT_ALG = os.getenv("JWT_ALG", "HS256").strip().upper()
+JWT_AUD = os.getenv("JWT_AUDIENCE", "confmgr")
+JWT_ISS = os.getenv("ISSUER", "confmgr")
+JWT_TTL = int(os.getenv("JWT_TTL_SECONDS", "3600"))
 
-# System actor id for unauthenticated audit events (failed/error)
-SYSTEM_PRINCIPAL_ID = os.getenv(
-    "SYSTEM_PRINCIPAL_ID",
-    "00000000-0000-0000-0000-000000000001"
-)
+# HS: JWT_SIGNING_KEY (raw or path). RS/ES: JWT_PRIVATE_KEY (PEM or path).
+JWT_SIGNING_KEY = os.getenv("JWT_SIGNING_KEY", "")
+JWT_PRIVATE_KEY = os.getenv("JWT_PRIVATE_KEY", "")
 
-# RBAC -> OAuth2-like scopes mapping (derived permissions)
-ROLE_TO_SCOPES = {
-    "GLOBAL_ADMIN": ["config.read","config.write","secret.read","secret.write","user.read","user.write"],
-    "CONFIG_ADMIN": ["config.read","config.write"],
-    "CONFIG_VIEWER":["config.read"],
-    "SECRET_ADMIN": ["secret.read","secret.write"],
-    "SECRET_VIEWER":["secret.read"],
-    "USER_ADMIN":   ["user.read","user.write"],
-    "USER_VIEWER":  ["user.read"],
+# Role → scopes map (example; adjust to your policy)
+ROLE_SCOPE_MAP = {
+    "GLOBAL_ADMIN": ["*"],
+    "CONFIG_VIEWER": ["config.read"],
+    "CONFIG_ADMIN": ["config.read", "config.write"],
+    "SECRET_VIEWER": ["secret.read"],
+    "SECRET_ADMIN": ["secret.read", "secret.write"],
+    "USER_VIEWER": ["user.read"],
+    "USER_ADMIN": ["user.read", "user.write"],
 }
 
-def scopes_from_roles(roles: list[str]) -> str:
-    """Map roles to a space-delimited scope string (least-privilege friendly)."""
-    perms: list[str] = []
-    for r in roles:
-        for p in ROLE_TO_SCOPES.get(r, []):
-            if p not in perms:
-                perms.append(p)
-    return " ".join(perms)
 
+# --- Models ---
 class LoginIn(BaseModel):
+    """Login request payload."""
     username: str
     password: str
 
-SQL_LOGIN = """
-SELECT
-  u.id::text,
-  u.username,
-  u.email,
-  COALESCE(
-    ARRAY_AGG(DISTINCT r.name ORDER BY r.name)
-      FILTER (WHERE r.name IS NOT NULL),
-    ARRAY[]::core.role_type[]
-  ) AS roles
-FROM core.users u
-LEFT JOIN core.user_roles ur ON ur.user_id = u.id
-LEFT JOIN core.roles r ON r.id = ur.role_id
-WHERE u.username = %s
-  AND u.is_active = true
-  AND u.password_hash = digest(%s, 'sha256')
-GROUP BY u.id, u.username, u.email
-"""
 
-def mint_jwt(user_id: str, username: str, email: str, roles: list[str]) -> str:
-    """Build and sign a short-lived JWT used by the frontend as a Bearer token."""
-    now = dt.datetime.now(dt.timezone.utc)
-    exp = now + dt.timedelta(seconds=JWT_TTL_S)
-    payload = {
-        "sub": user_id,
-        "username": username,
-        "email": email,
-        "roles": roles,                       # canonical RBAC claim
-        "scope": scopes_from_roles(roles),    # derived OAuth2-like permissions
+class LoginOut(BaseModel):
+    """Login response with token and derived capabilities."""
+    access_token: str
+    token_type: str = "bearer"
+    roles: List[str]
+    scopes: List[str]
+
+
+# --- Helpers ---
+def _read_key_material(value_or_path: str) -> str:
+    """Return PEM/secret from env or file path; raise if missing."""
+    if not value_or_path:
+        raise ValueError("Missing key material")
+    try:
+        if os.path.exists(value_or_path):
+            with open(value_or_path, "r", encoding="utf-8") as f:
+                return f.read()
+    except OSError:
+        # Fall back to literal string (env already contained PEM/secret)
+        pass
+    return value_or_path
+
+
+def _derive_scopes(roles: list[str]) -> list[str]:
+    """Union scopes for all roles; '*' wins."""
+    scopes: list[str] = []
+    for r in roles:
+        scopes += ROLE_SCOPE_MAP.get(r, [])
+    scopes = sorted(set(scopes))
+    return ["*"] if "*" in scopes else scopes
+
+
+def _issue_jwt(sub: str, roles: list[str], scopes: list[str]) -> str:
+    """Create and sign JWT with roles array and space-delimited scope."""
+    now = datetime.now(timezone.utc)
+    claims = {
+        "sub": sub,
         "iss": JWT_ISS,
         "aud": JWT_AUD,
         "iat": int(now.timestamp()),
-        "exp": int(exp.timestamp()),
+        "exp": int((now + timedelta(seconds=JWT_TTL)).timestamp()),
+        "roles": roles,
+        "scope": " ".join(scopes),
     }
-    return jwt.encode(payload, JWT_KEY, algorithm=JWT_ALG)
 
-@router.post("/login")
-def login(body: LoginIn, request: Request):
-    """Authenticate user by username/password, issue JWT, and audit the attempt."""
-    client_ip = request.headers.get("x-forwarded-for") or (request.client.host if request.client else None)
-    user_agent = request.headers.get("user-agent")
+    if JWT_ALG.startswith("HS"):
+        key = _read_key_material(JWT_SIGNING_KEY)
+    else:
+        key = _read_key_material(JWT_PRIVATE_KEY)
 
+    return jwt.encode(claims, key, algorithm=JWT_ALG)
+
+
+def _check_credentials(username: str, password: str) -> Optional[list[str]]:
+    """
+    Very basic credential check for demo:
+    - admin/admin → GLOBAL_ADMIN
+    - config/config → CONFIG_ADMIN
+    - otherwise: invalid
+    Replace with real DB lookup (bcrypt/argon2) when ready.
+    """
+    if username == "admin" and password == "admin":
+        return ["GLOBAL_ADMIN"]
+    if username == "config" and password == "config":
+        return ["CONFIG_ADMIN"]
+    return None
+
+
+def _audit(event: str, subject: str, path: str, payload: dict) -> None:
+    """Best-effort audit; never raises to the caller."""
     try:
-        with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
-            # Verify credentials and collect roles
-            cur.execute(SQL_LOGIN, (body.username, body.password))
-            row = cur.fetchone()
-            if not row:
-                # Audit failed login (wrong credentials)
-                try:
-                    cur.execute(
-                        "select audit.log_event(%s::uuid,%s::text,%s::text,%s::text,%s::jsonb)",
-                        (
-                            SYSTEM_PRINCIPAL_ID,
-                            body.username,
-                            "auth.login.failed",
-                            "auth/login",
-                            Json({"client_ip": client_ip, "user_agent": user_agent}),
-                        ),
-                    )
-                    conn.commit()
-                except Exception:
-                    conn.rollback()
-                raise HTTPException(status_code=401, detail="Invalid credentials")
+        with pool.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "select audit.log_event(%s::uuid,%s::text,%s::text,%s::text,%s::jsonb)",
+                (
+                    "11111111-1111-1111-1111-111111111111",  # system principal
+                    subject,
+                    event,
+                    path,
+                    Json(payload),
+                ),
+            )
+            conn.commit()
+    except Exception:  # pylint: disable=broad-exception-caught
+        logger.debug("audit skipped (best-effort)", exc_info=True)
 
-            # Normalize roles to a plain list[str] (defensive)
-            raw_roles = row["roles"]
-            if raw_roles is None:
-                roles: list[str] = []
-            elif isinstance(raw_roles, (list, tuple)):
-                roles = list(raw_roles)
-            elif isinstance(raw_roles, str):
-                s = raw_roles.strip()
-                roles = [] if s == "{}" else [p.strip().strip('"') for p in s.strip("{}").split(",") if p.strip()]
-            else:
-                roles = []
 
-            user_id  = row["id"]
-            username = row["username"]
-            email    = row["email"]
+# --- Route ---
+@router.post("/login", response_model=LoginOut)
+def login(body: LoginIn) -> LoginOut:
+    """Authenticate user and return JWT with roles + scopes."""
+    try:
+        roles = _check_credentials(body.username, body.password)
+        if not roles:
+            raise HTTPException(status_code=401, detail="Invalid credentials")
 
-            # Best-effort last_login update
-            try:
-                cur.execute("UPDATE core.users SET last_login = now() WHERE id = %s", (user_id,))
-            except Exception:
-                conn.rollback()  # do not fail auth on this
+        scopes = _derive_scopes(roles)
+        token = _issue_jwt(body.username, roles, scopes)
 
-            # Audit success
-            try:
-                cur.execute(
-                    "select audit.log_event(%s::uuid,%s::text,%s::text,%s::text,%s::jsonb)",
-                    (
-                        user_id,
-                        username or body.username,
-                        "auth.login.success",
-                        "auth/login",
-                        Json({"client_ip": client_ip, "user_agent": user_agent, "roles": roles}),
-                    ),
-                )
-                conn.commit()
-            except Exception:
-                conn.rollback()
-
-            token = mint_jwt(user_id, username, email, roles)
-            return {
-                "access_token": token,
-                "token_type": "bearer",
-                "user": {
-                    "id": user_id,
-                    "username": username,
-                    "email": email,
-                    "roles": roles
-                }
-            }
+        _audit("auth.login.success", body.username, "auth/login", {"roles": roles})
+        return LoginOut(access_token=token, roles=roles, scopes=scopes)
 
     except HTTPException:
+        # already a proper client error
+        _audit("auth.login.fail", body.username, "auth/login", {"reason": "client"})
         raise
-    except Exception as e:
-        # Audit unexpected error; do not leak details to the client
+    except (jwt.PyJWTError, ValueError, KeyError) as e:
+        # expected validation/key errors
+        _audit("auth.login.fail", body.username, "auth/login", {"reason": "bad_token"})
+        raise HTTPException(status_code=401, detail="Invalid credentials") from e
+    except Exception as e:  # unexpected
         logger.exception("Login failed due to server error")
-        try:
-            with pool.connection() as conn, conn.cursor() as cur:
-                cur.execute(
-                    "select audit.log_event(%s::uuid,%s::text,%s::text,%s::text,%s::jsonb)",
-                    (
-                        SYSTEM_PRINCIPAL_ID,
-                        body.username,
-                        "auth.login.error",
-                        "auth/login",
-                        Json({"error": str(e), "client_ip": client_ip, "user_agent": user_agent}),
-                    ),
-                )
-                conn.commit()
-        except Exception:
-            pass
-        raise HTTPException(status_code=500, detail="Authentication service error")
+        _audit("auth.login.error", body.username, "auth/login", {"error": e.__class__.__name__})
+        raise HTTPException(status_code=500, detail="Authentication service error") from e

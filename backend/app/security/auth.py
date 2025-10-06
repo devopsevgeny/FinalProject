@@ -1,21 +1,24 @@
-# app/security/auth.py
+# backend/app/security/auth.py
+"""Authentication helpers: API key / Bearer JWT validators."""
 import os
 import logging
 import re
 from dataclasses import dataclass
 from typing import Optional, Any, Dict
+
 from fastapi import Header, HTTPException
 import jwt  # PyJWT
 
 logger = logging.getLogger(__name__)
 
 AUTH_TYPE = os.getenv("AUTH_TYPE", "API_KEY").strip().upper()
-API_KEY   = os.getenv("API_KEY", "")
+API_KEY = os.getenv("API_KEY", "")
 
-JWT_ALG         = os.getenv("JWT_ALG", "HS256")
+JWT_ALG = os.getenv("JWT_ALG", "HS256")
 JWT_SIGNING_KEY = os.getenv("JWT_SIGNING_KEY", "")
-JWT_AUDIENCE    = os.getenv("JWT_AUDIENCE", "confmgr")
-ISSUER          = os.getenv("ISSUER", "")
+JWT_AUDIENCE = os.getenv("JWT_AUDIENCE", "confmgr")
+ISSUER = os.getenv("ISSUER", "")
+
 
 @dataclass
 class AuthPrincipal:
@@ -23,12 +26,15 @@ class AuthPrincipal:
     id: str
     subject: Optional[str] = None
     issuer: Optional[str] = None
-    roles: Optional[list[str]] = None     # groups / RBAC roles
-    scopes: Optional[list[str]] = None    # permissions (derived from 'scope' claims)
+    roles: Optional[list[str]] = None      # groups / RBAC roles
+    scopes: Optional[list[str]] = None     # permissions (derived from 'scope' claims)
 
-def _unauth(detail: str):
+
+def _unauth(detail: str) -> None:
+    """Raise 401 with a generic message, log internal detail."""
     logger.warning("Auth failed: %s", detail)
     raise HTTPException(status_code=401, detail="Unauthorized")
+
 
 def _require_api_key(x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> AuthPrincipal:
     """Simple header-based API key auth."""
@@ -41,7 +47,9 @@ def _require_api_key(x_api_key: str | None = Header(default=None, alias="X-API-K
     # For API key we don't assign roles/scopes by default
     return AuthPrincipal(id="api-key", subject="api-key", issuer="local", roles=[], scopes=[])
 
+
 _SPLIT_RE = re.compile(r"[,\s]+")
+
 
 def _to_list(v: Any) -> list[str]:
     """Coerce common representations to list[str]."""
@@ -58,43 +66,42 @@ def _to_list(v: Any) -> list[str]:
         return [p for p in _SPLIT_RE.split(s) if p]
     return [str(v)] if str(v).strip() else []
 
+
 def _unique(xs: list[str]) -> list[str]:
+    """Stable unique list."""
     out: list[str] = []
     for x in xs:
         if x and x not in out:
             out.append(x)
     return out
 
+
 def _extract_roles(payload: Dict[str, Any]) -> list[str]:
     """Extract roles/groups only (do not mix with 'scope')."""
     roles: list[str] = []
-    # Our canonical claim
-    roles += _to_list(payload.get("roles"))
-    # Common alternates
-    roles += _to_list(payload.get("groups"))
-    # Keycloak styles
-    realm = payload.get("realm_access") or {}
+    roles += _to_list(payload.get("roles"))        # canonical
+    roles += _to_list(payload.get("groups"))       # alternates
+    realm = payload.get("realm_access") or {}      # keycloak
     if isinstance(realm, dict):
         roles += _to_list(realm.get("roles"))
-    res = payload.get("resource_access") or {}
+    res = payload.get("resource_access") or {}     # keycloak resource roles
     if isinstance(res, dict):
         for v in res.values():
             if isinstance(v, dict):
                 roles += _to_list(v.get("roles"))
     return _unique(roles)
 
+
 def _extract_scopes(payload: Dict[str, Any]) -> list[str]:
     """Extract OAuth2-like permissions from 'scope'-style claims only."""
     scopes: list[str] = []
-    # Standard OAuth2 (space-delimited string)
-    scopes += _to_list(payload.get("scope"))
-    # Sometimes providers put array or alt claim name
-    scopes += _to_list(payload.get("scopes"))
-    # Azure AD often uses 'scp'
-    scopes += _to_list(payload.get("scp"))
+    scopes += _to_list(payload.get("scope"))   # standard space-delimited
+    scopes += _to_list(payload.get("scopes"))  # sometimes array/alt
+    scopes += _to_list(payload.get("scp"))     # Azure AD
     return _unique(scopes)
 
-def _require_bearer(authorization: str | None = Header(default=None)) -> AuthPrincipal:
+
+def _require_bearer(authorization: str | None = Header(default=None, alias="Authorization")) -> AuthPrincipal:
     """Validate a Bearer JWT and build AuthPrincipal with separate roles/scopes."""
     if not authorization:
         _unauth("Missing Authorization header")
@@ -103,6 +110,8 @@ def _require_bearer(authorization: str | None = Header(default=None)) -> AuthPri
         _unauth("Malformed Authorization header")
 
     token = parts[1]
+
+    # Only signature/claims decoding inside try; a single return at the end.
     try:
         payload = jwt.decode(
             token,
@@ -112,15 +121,6 @@ def _require_bearer(authorization: str | None = Header(default=None)) -> AuthPri
             issuer=ISSUER,
             leeway=30,
             options={"require": ["exp", "iat", "sub"]},
-        )
-        roles  = _extract_roles(payload)
-        scopes = _extract_scopes(payload)
-        return AuthPrincipal(
-            id=payload["sub"],
-            subject=payload.get("sub"),
-            issuer=payload.get("iss"),
-            roles=roles or [],
-            scopes=scopes or [],
         )
     except jwt.ExpiredSignatureError:
         _unauth("Token expired")
@@ -133,13 +133,28 @@ def _require_bearer(authorization: str | None = Header(default=None)) -> AuthPri
     except jwt.PyJWTError as e:
         _unauth(f"JWT error: {e}")
 
+    roles = _extract_roles(payload)
+    scopes = _extract_scopes(payload)
+    principal = AuthPrincipal(
+        id=str(payload.get("sub") or "bearer"),
+        subject=payload.get("sub"),
+        issuer=payload.get("iss"),
+        roles=roles or [],
+        scopes=scopes or [],
+    )
+    return principal  # single explicit return fixes R1710
+
+
+# Public aliases for FastAPI dependencies
 require_api_key = _require_api_key
-require_bearer  = _require_bearer
+require_bearer = _require_bearer
+
 
 def resolve_created_by(principal: AuthPrincipal, x_actor_id: str | None) -> str:
     """Resolve the created_by ID from principal or X-Actor-Id header."""
     if x_actor_id:
         return x_actor_id
     return principal.id if principal else "system"
+
 
 __all__ = ["require_api_key", "require_bearer", "AuthPrincipal", "resolve_created_by"]
