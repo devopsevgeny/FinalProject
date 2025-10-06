@@ -1,13 +1,14 @@
+"""Module for masking helpers."""
 from typing import Any, Dict
 
 def mask_sensitive_values(data: Dict[str, Any]) -> Dict[str, Any]:
     """Recursively mask sensitive values in dictionaries."""
     masked = {}
     sensitive_keys = {
-        'password', 'secret', 'key', 'token', 
+        'password', 'secret', 'key', 'token',
         'api_key', 'apikey', 'auth', 'credential'
     }
-    
+
     for k, v in data.items():
         if isinstance(v, dict):
             masked[k] = mask_sensitive_values(v)

@@ -1,34 +1,31 @@
-import os, psycopg
-from psycopg_pool import ConnectionPool  # встроен в psycopg[binary]
+"""Database connection pool."""
 
-def _conn_str() -> str:
-    # libpq варианты читаются из окружения (PGHOST, PGUSER, PGDATABASE и т.д.)
-    return ""
+import os
+from psycopg_pool import ConnectionPool
+
+def _conninfo() -> str:
+    """
+    Use libpq env (PGHOST, PGUSER, PGDATABASE, PGSSLMODE, PGSSLROOTCERT, PGSSLCERT, PGSSLKEY, etc.).
+    Keep empty string to let psycopg read from environment.
+    Optional: override via PG_CONNINFO if provided.
+    """
+    return os.getenv("PG_CONNINFO", "")
 
 pool = ConnectionPool(
-    conninfo=_conn_str(),
-    kwargs=dict(
-        host=os.getenv("PGHOST", "postgres"),
-        dbname=os.getenv("PGDATABASE", "postgres"),
-        user=os.getenv("PGUSER", "confmgr_db"),
-        sslmode=os.getenv("PGSSLMODE", "verify-full"),
-        sslrootcert=os.getenv("PGSSLROOTCERT"),
-        sslcert=os.getenv("PGSSLCERT"),
-        sslkey=os.getenv("PGSSLKEY"),
-        connect_timeout=5,
-    ),
+    conninfo=_conninfo(),
+    min_size=1,
     max_size=int(os.getenv("DB_POOL_MAX", "10")),
     timeout=10,
 )
 
 def qrow(sql: str, params: tuple | None = None):
-    with pool.connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(sql, params or ())
-            return cur.fetchone()
+    """Execute a query and return the first row (or None)."""
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, params or ())
+        return cur.fetchone()
 
-def qexec(sql: str, params: tuple | None = None):
-    with pool.connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(sql, params or ())
-            conn.commit()
+def qexec(sql: str, params: tuple | None = None) -> None:
+    """Execute a statement and commit."""
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, params or ())
+        conn.commit()

@@ -1,3 +1,4 @@
+"""Logging configuration helpers for FastAPI app."""
 import logging
 import sys
 
@@ -17,4 +18,3 @@ def setup_logging(level=logging.INFO):
     # silence noisy libraries if needed
     logging.getLogger("psycopg").setLevel(logging.WARNING)
     logging.getLogger("cryptography").setLevel(logging.WARNING)
-

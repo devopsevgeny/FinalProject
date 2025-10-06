@@ -1,0 +1,5 @@
+[MASTER]
+ignore-patterns=^scripts/.*
+
+[FORMAT]
+max-line-length=120

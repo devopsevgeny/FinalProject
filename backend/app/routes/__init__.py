@@ -1,9 +1,19 @@
+
 # app/routes/__init__.py
+"""
+Aggregates all routers for ConfMgr backend.
+"""
+
 from fastapi import APIRouter
-from .login import router as login_router
-from .whoami import router as whoami_router
+
+# Import subrouters explicitly (no relative import from main)
+from app.routes import health, login, whoami, config, secrets
 
 router = APIRouter()
-router.include_router(login_router)
-router.include_router(whoami_router)
 
+# Include routers in a consistent order
+router.include_router(health.router)
+router.include_router(login.router)
+router.include_router(whoami.router)
+router.include_router(config.router)
+router.include_router(secrets.router)

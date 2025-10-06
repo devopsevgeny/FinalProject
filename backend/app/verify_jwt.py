@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# pylint: disable=too-many-branches,too-many-statements,broad-exception-caught
+"""JWT verification CLI for ConfMgr (HS/RS/ES)."""
+
 # -*- coding: utf-8 -*-
 
 # Simple JWT verifier for ConfMgr.
@@ -40,6 +43,7 @@ def read_key_material(value_or_path: Optional[str]) -> Optional[str]:
     return value_or_path
 
 def main() -> int:
+    """Verify a JWT and print header/claims."""
     parser = argparse.ArgumentParser(description="Verify a JWT (signature + iss/aud/exp).")
     parser.add_argument("--token", "-t", help="JWT string; if omitted, read from STDIN", default=None)
     parser.add_argument("--alg", help="Algorithm (HS256/RS256/ES256). Default from $JWT_ALG or HS256.",

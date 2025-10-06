@@ -1,4 +1,7 @@
-# backend/app/demo_secret_roundtrip.py
+"""Demo secret roundtrip utility (dev-only)."""
+
+if __name__ == "__main__":
+
 import os
 import json
 import uuid
