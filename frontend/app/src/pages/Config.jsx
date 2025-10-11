@@ -119,7 +119,7 @@ export default function ConfigPage() {
       if (data.app_name) setAppName(data.app_name)
       setFileMeta(null)
     } catch (e) {
-      const message = e?.response?.data?.detail || e?.message || 'Write failed'
+      const message = e?.response?.data?.detail || 'Write failed'
       logError('config.write.error', { appId: trimmedAppId, path, message, mode: 'json' })
       setErr(message)
     }
