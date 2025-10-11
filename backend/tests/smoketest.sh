@@ -2,7 +2,7 @@
 # ConfMgr end-to-end smoke test with PASS/FAIL summary
 
 # --- safety: keep running to collect all failures ---
-set -u -o pipefail
+set -u -o  
 
 # --- colors ---
 GREEN='\033[0;32m'; RED='\033[0;31m'; YLW='\033[0;33m'; BOLD='\033[1m'; NC='\033[0m'
@@ -10,11 +10,12 @@ bold() { printf "${BOLD}%s${NC}\n" "$*"; }
 sep()  { printf -- "-----------------------------------------------------------------\n"; }
 ok()   { printf "${GREEN}✓ %s${NC}\n" "$*"; }
 fail() { printf "${RED}✗ %s${NC}\n" "$*"; }
-
+ 
 # --- tmp workspace ---
 TMP="$(mktemp -d)"
 cleanup() { rm -rf "$TMP"; }
 trap cleanup EXIT
+
 
 # --- read .env if present (only for missing vars) ---
 if [ -f "../../.env" ]; then
@@ -32,6 +33,9 @@ CONFIG_PATH="${CONFIG_PATH:-app/feature-flags}"
 ACTOR_ID="${ACTOR_ID:-$(uuidgen)}"
 ACTOR_SUBJECT="${ACTOR_SUBJECT:-smoke-test}"
 API_KEY="${API_KEY:-}"
+TOKEN=$(curl -sS http://localhost:8080/auth/login \
+  -H 'Content-Type: application/json' \
+  --data '{"username":"admin","password":"admin"}' | jq -r .access_token)
 
 # --- counters ---
 TOTAL=0; PASS=0; FAIL=0
@@ -58,6 +62,7 @@ header() {
   echo "ACTOR_ID=${ACTOR_ID}"
   echo "ACTOR_SUBJECT=${ACTOR_SUBJECT}"
   echo "API_KEY=<hidden:${hide_key}>"
+  echo "TOKEN=<hidden:${TOKEN:0:6}…${TOKEN: -4}>"
   sep
 }
 header

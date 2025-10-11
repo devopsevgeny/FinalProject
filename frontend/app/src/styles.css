@@ -1,0 +1,3 @@
+body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+.container { padding: 16px; }
+pre { background: #1112; padding: 12px; border-radius: 8px; overflow: auto; }
