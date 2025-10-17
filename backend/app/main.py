@@ -15,13 +15,16 @@ app = FastAPI(title="confmgr-backend")
 
 # ---------- CORS ----------
 # Allowed origins (comma-separated). Default: http://localhost:5173
-CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:5173")
-origins = [o.strip() for o in CORS_ORIGINS.split(",") if o.strip()]
+raw_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173")
+origins = [o.strip() for o in raw_origins.split(",") if o.strip()]
+allow_all = any(o == "*" for o in origins)
+if allow_all:
+    origins = ["*"]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_credentials=True,
+    allow_credentials=not allow_all,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=[
         "Content-Type",

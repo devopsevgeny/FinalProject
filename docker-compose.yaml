@@ -41,6 +41,7 @@ services:
       PGSSLROOTCERT: /run/certs/ca.crt
       PGSSLCERT: /run/certs/client.crt
       PGSSLKEY: /run/certs/client.key
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
     volumes:
       - ./certs/ca.crt:/run/certs/ca.crt:ro
       - ./certs/client.crt:/run/certs/client.crt:ro
@@ -48,6 +49,23 @@ services:
     ports:
       - "8080:8080"
     restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE: /api
+    depends_on:
+      backend:
+        condition: service_started
+    environment:
+      VITE_API_BASE: /api
+    ports:
+      - "5173:443"
+    restart: unless-stopped
+    volumes:
+      - ./certs/frontend/fullchain.pem:/etc/nginx/certs/fullchain.pem:ro
+      - ./certs/frontend/privkey.pem:/etc/nginx/certs/privkey.pem:ro
 
 volumes:
   pgdata: {}

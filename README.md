@@ -58,9 +58,10 @@ Response:
 ## Configuration Endpoints
 
 ### GET /config/{path}
-Retrieve configuration value.
+Retrieve the current configuration value (JSON or file metadata).
 ```bash
-curl -H "X-API-Key: your-api-key" http://localhost:8080/config/myapp/settings
+curl -H "X-API-Key: your-api-key" \
+  "http://localhost:8080/config/myapp/settings?appId=myapp"
 ```
 
 Response:
@@ -68,19 +69,48 @@ Response:
 {
     "path": "myapp/settings",
     "version": 1,
+    "data_type": "json",
     "value": {"setting1": "value1"},
+    "file_name": null,
+    "file_size": null,
     "created_at": "2025-09-25T12:00:00Z"
 }
 ```
+For file-backed configs `data_type` is `file`, `value` is `null`, and `file_*` fields describe the stored file.
 
 ### POST /config/{path}
-Create or update configuration.
+Create or update a JSON configuration document.
 ```bash
 curl -X POST \
      -H "X-API-Key: your-api-key" \
      -H "Content-Type: application/json" \
-     -d '{"value": {"setting1": "value1"}}' \
-     http://localhost:8080/config/myapp/settings
+     -H "X-Actor-Id: user123" \
+     -d '{"app_id": "myapp", "app_name": "My App", "value": {"setting1": "value1"}}' \
+     "http://localhost:8080/config/myapp/settings?appId=myapp"
+```
+
+### POST /config/{path}/file
+Upload a configuration file (binary payload stored as a versioned blob).
+```bash
+curl -X POST \
+     -H "X-API-Key: your-api-key" \
+     -H "X-Actor-Id: user123" \
+     -F app_id=myapp \
+     -F app_name="My App" \
+     -F file=@config.yaml \
+     http://localhost:8080/config/myapp/settings/file
+```
+
+### GET /config/{path}/file
+Download the current (or specific) file-backed configuration.
+```bash
+# Current version
+curl -OJ -H "X-API-Key: your-api-key" \
+  "http://localhost:8080/config/myapp/settings/file?appId=myapp"
+
+# Specific version
+curl -OJ -H "X-API-Key: your-api-key" \
+  "http://localhost:8080/config/myapp/settings/file?appId=myapp&version=3"
 ```
 
 ## Secret Endpoints
@@ -145,6 +175,10 @@ export ISSUER=your-issuer
 
 # CORS
 export CORS_ORIGINS=http://localhost:3000,https://app.example.com
+
+# Config file uploads
+export CONFIG_FILE_MAX_BYTES=5242880            # 5 MiB default
+export CONFIG_FILE_ALLOWED_PREFIXES=application/,text/,image/svg+xml
 ```
 
 ## Security Features
@@ -152,9 +186,11 @@ export CORS_ORIGINS=http://localhost:3000,https://app.example.com
 1. Path validation to prevent traversal attacks
 2. AES-GCM encryption for secrets
 3. Version binding for encrypted data
-4. Atomic updates with optimistic locking
-5. Audit logging for all changes
-6. CORS protection with explicit origins
+4. Versioned config storage (JSON or file blob) with SHA-256 integrity checks
+5. File uploads constrained by size limit and MIME allow-list
+6. Atomic updates with optimistic locking
+7. Audit logging for all changes
+8. CORS protection with explicit origins
 
 ## Error Responses
 

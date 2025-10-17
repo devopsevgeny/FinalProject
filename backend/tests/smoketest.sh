@@ -197,12 +197,17 @@ select
   ci.path,
   cv.version,
   cv.is_current,
+  cv.data_type,
   encode(cv.checksum,'hex') as checksum_hex,
   cv.value_json,
+  cf.file_name,
+  cf.file_size,
+  cf.content_type,
   cv.created_at,
   cv.created_by
 from core.config_items ci
 join core.config_versions cv on cv.item_id=ci.id
+left join core.config_version_files cf on cf.version_id = cv.id
 where ci.path='${CONFIG_PATH}'
 order by cv.version;
 "

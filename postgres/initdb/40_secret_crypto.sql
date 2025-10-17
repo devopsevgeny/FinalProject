@@ -6,7 +6,8 @@ create schema if not exists core;
 -- Items
 create table if not exists core.secret_items(
   id          bigserial primary key,
-  path        text not null unique,
+  app_id      text not null references core.apps(app_id),
+  path        text not null,
   created_by  uuid not null,
   created_at  timestamptz not null default now()
 );
@@ -26,7 +27,9 @@ create table if not exists core.secret_versions(
 );
 
 -- Indexes for fast lookups
-create index if not exists idx_secret_items_path on core.secret_items(path);
+create index if not exists idx_secret_items_app on core.secret_items(app_id);
+create unique index if not exists ux_secret_items_app_path
+  on core.secret_items(app_id, path);
 create unique index if not exists ux_secret_versions_current
   on core.secret_versions(item_id) where is_current;
 create index if not exists ix_secret_item_ver_desc

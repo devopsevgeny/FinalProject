@@ -13,6 +13,7 @@ GRANT SELECT, INSERT, UPDATE ON TABLE core.secret_items     TO confmgr_db;
 GRANT SELECT, INSERT, UPDATE ON TABLE core.secret_versions  TO confmgr_db;
 GRANT SELECT, INSERT, UPDATE ON TABLE core.config_items     TO confmgr_db;
 GRANT SELECT, INSERT, UPDATE ON TABLE core.config_versions  TO confmgr_db;
+GRANT SELECT, INSERT, UPDATE ON TABLE core.config_version_files TO confmgr_db;
 GRANT SELECT                      ON TABLE core.api_clients TO confmgr_db;
 
 -- ===== Auth grants (login) =====
