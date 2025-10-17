@@ -214,11 +214,21 @@ async def put_config_file(
     app_name = (app_name or "").strip() or None
 
     data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
     if len(data) > MAX_FILE_BYTES:
-        raise HTTPException(status_code=400, detail="Config file too large")
+        raise HTTPException(
+            status_code=413,
+            detail=f"File exceeds limit of {MAX_FILE_BYTES} bytes",
+        )
+
+    mime = (mime or file.content_type or "").lower()
     if ALLOWED_FILE_MIME_PREFIXES and mime:
         if not any(mime.startswith(prefix) for prefix in ALLOWED_FILE_MIME_PREFIXES):
-            raise HTTPException(status_code=400, detail="Config MIME not allowed")
+            raise HTTPException(
+                status_code=415,
+                detail="Unsupported file type",
+            )
 
     created_by = resolve_created_by(_principal, x_actor_id)
     checksum = hashlib.sha256(data).digest()

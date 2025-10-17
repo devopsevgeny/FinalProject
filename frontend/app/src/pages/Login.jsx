@@ -21,7 +21,7 @@ export default function Login() {
 
   const goToApp = useCallback(() => {
     nav('/app', { replace: true })
-    // HashRouter fallback (or any case where nav does not update location synchronously)
+    // HashRouter fallback (or any case where navigation is not synchronous)
     setTimeout(() => {
       if (!location.hash.includes('/app') && location.pathname !== '/app') {
         location.hash = '#/app'
@@ -29,7 +29,7 @@ export default function Login() {
     }, 0)
   }, [nav])
 
-  // Если уже залогинен — сразу на главную страницу
+  // If already authenticated, send user to the main page immediately
   useEffect(() => {
     const s = getSession()
     if (s?.token) {

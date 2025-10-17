@@ -42,12 +42,16 @@ export async function loginRequest({ email, username, password }) {
     });
     if (w.ok) {
       const who = await w.json();
+      const principal = who?.principal || {};
       user = {
-        id: who?.sub || who?.user_id || null,
-        username: who?.username || who?.name || null,
-        email: who?.email || null,
-        roles: who?.roles || who?.permissions || [],
-        lastLogin: who?.last_login || null
+        id: principal.id || who?.sub || who?.user_id || null,
+        username: principal.subject || principal.username || who?.username || who?.name || null,
+        subject: principal.subject || null,
+        email: principal.email || who?.email || null,
+        roles: principal.roles || who?.roles || principal.permissions || [],
+        scopes: principal.scopes || who?.scopes || [],
+        lastLogin: who?.last_login || null,
+        raw: who
       };
     }
   }

@@ -66,7 +66,6 @@ def list_secrets(
             for row in rows
         ]
 
-
 @router.get("/all", response_model=list[SecretOut])
 def get_all_secrets(
     app_id: str = Query(default="default", alias="appId"),
