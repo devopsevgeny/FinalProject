@@ -1,0 +1,14 @@
+name: Test self-hosted runner
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: [self-hosted, Linux, X64]
+    steps:
+      - name: Print info
+        run: |
+          echo "Runner is working!"
+          uname -a
+          whoami
