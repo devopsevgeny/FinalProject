@@ -1,0 +1,68 @@
+version: '3'
+
+vars:
+  COMPOSE: docker compose
+
+tasks:
+  down:
+    desc: Stop stack and remove orphan containers (no volume cleanup)
+    cmds:
+      - '{{.COMPOSE}} down --remove-orphans'
+
+  clean:
+    desc: Stop stack and remove volumes (fresh DB next run)
+    cmds:
+      - '{{.COMPOSE}} down --volumes --remove-orphans'
+
+  build:
+    desc: Build all images with cache
+    cmds:
+      - '{{.COMPOSE}} build'
+
+  build-nocache:
+    desc: Build all images without cache
+    cmds:
+      - '{{.COMPOSE}} build --no-cache'
+
+  backend-build:
+    desc: Rebuild backend service image with cache
+    cmds:
+      - '{{.COMPOSE}} build backend'
+
+  backend-build-nocache:
+    desc: Rebuild backend service image without cache
+    cmds:
+      - '{{.COMPOSE}} build --no-cache backend'
+
+  frontend-build:
+    desc: Rebuild frontend service image with cache
+    cmds:
+      - '{{.COMPOSE}} build frontend'
+
+  frontend-build-nocache:
+    desc: Rebuild frontend service image without cache
+    cmds:
+      - '{{.COMPOSE}} build --no-cache frontend'
+
+  up:
+    desc: Start full stack in background (detached)
+    cmds:
+      - '{{.COMPOSE}} up -d'
+
+  restart:
+    desc: Restart stack (down + up)
+    deps: [down]
+    cmds:
+      - '{{.COMPOSE}} up -d'
+
+  fresh:
+    desc: Clean volumes, rebuild without cache, start stack
+    cmds:
+      - task: clean
+      - task: build-nocache
+      - task: up
+  logs:
+    desc: Follow docker compose logs
+    cmds:
+      - '{{.COMPOSE}} logs -f'
+
