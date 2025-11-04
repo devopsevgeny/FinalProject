@@ -21,5 +21,8 @@ __pycache__/
 .vscode/
 .idea/
 .DS_Store
+# npm artifacts
+frontend/app/app@0.0.0/
+frontend/app/eslint/
 #Dont ignore 
 !src/types/
