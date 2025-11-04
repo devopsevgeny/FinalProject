@@ -9,7 +9,11 @@ ENV VITE_API_BASE=${VITE_API_BASE}
 ENV VITE_API_KEY=${VITE_API_KEY}
 
 COPY app/package*.json ./
-RUN npm ci
+RUN npm config set fetch-retries 6 \
+    && npm config set fetch-retry-mintimeout 20000 \
+    && npm config set fetch-retry-maxtimeout 180000 \
+    && npm config set fetch-timeout 120000 \
+    && npm ci
 COPY app .
 RUN npm run build
 
