@@ -3,7 +3,7 @@ from typing import Any, Dict
 
 def mask_sensitive_values(data: Dict[str, Any]) -> Dict[str, Any]:
     """Recursively mask sensitive values in dictionaries."""
-    masked = {}
+    masked: Dict[str, Any] = {}
     sensitive_keys = {
         'password', 'secret', 'key', 'token',
         'api_key', 'apikey', 'auth', 'credential'

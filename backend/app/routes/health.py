@@ -47,8 +47,11 @@ def _check_db() -> Tuple[bool, Optional[str]]:
             cur.execute("select 1")
             cur.fetchone()
             cur.execute("select to_regclass('core.config_items')")
-            ok = cur.fetchone()[0] is not None
-            if not ok:
+            result = cur.fetchone()
+            if result and result[0] is not None:
+                ok = True
+            else:
+                ok = False
                 err = "required table core.config_items not found"
     except (PsycopgError, KeyError, TypeError) as exc:
         ok = False

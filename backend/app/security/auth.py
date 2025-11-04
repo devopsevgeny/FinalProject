@@ -4,7 +4,7 @@ import os
 import logging
 import re
 from dataclasses import dataclass
-from typing import Optional, Any, Dict
+from typing import Optional, Any, Dict, NoReturn
 
 from fastapi import Header, HTTPException
 import jwt  # PyJWT
@@ -30,7 +30,7 @@ class AuthPrincipal:
     scopes: Optional[list[str]] = None     # permissions (derived from 'scope' claims)
 
 
-def _unauth(detail: str) -> None:
+def _unauth(detail: str) -> NoReturn:
     """Raise 401 with a generic message, log internal detail."""
     logger.warning("Auth failed: %s", detail)
     raise HTTPException(status_code=401, detail="Unauthorized")

@@ -1,8 +1,9 @@
 """Helpers for managing application registry (core.apps)."""
+from typing import Any
 from psycopg import Cursor
 
 
-def ensure_app(cur: Cursor, app_id: str, app_name: str | None = None) -> str:
+def ensure_app(cur: Cursor[Any], app_id: str, app_name: str | None = None) -> str:
     """
     Ensure an app row exists. If app_name is provided, update it; otherwise
     create the row with app_id as the name and keep existing name on conflict.

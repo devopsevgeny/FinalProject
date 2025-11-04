@@ -2,6 +2,7 @@
 """Routes for secrets (AES-GCM at rest) with versioning & audit."""
 
 import json
+from typing import Any, Dict, Tuple
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from psycopg.rows import dict_row
@@ -18,7 +19,7 @@ from app.utils.apps import ensure_app
 router = APIRouter(prefix="/secret", tags=["secrets"])
 
 
-def _decrypt_secret(path: str, row: dict) -> dict:
+def _decrypt_secret(path: str, row: Dict[str, Any]) -> Dict[str, Any]:
     if row["alg"] != "AES256-GCM":
         raise HTTPException(status_code=500, detail="Unsupported algorithm")
     aad = f"{path}|{row['version']}".encode()
@@ -109,7 +110,7 @@ def get_secret(
         join core.apps a on a.app_id = si.app_id
         where si.path = %s and si.app_id = %s and sv.is_current
         """
-        params = (path, app_id)
+        params: Tuple[Any, ...] = (path, app_id)
     else:
         sql = """
         select sv.version, sv.ciphertext, sv.nonce, sv.alg, sv.created_at, si.app_id, a.app_name
@@ -163,7 +164,7 @@ def put_secret(
             (path, app_id),
         )
         row = cur.fetchone()
-        if not row:
+        if row is None:
             raise HTTPException(status_code=500, detail="Secret item not created")
         item_id = row["id"]
 
@@ -172,7 +173,10 @@ def put_secret(
             "from core.secret_versions where item_id = %s",
             (item_id,),
         )
-        next_ver = cur.fetchone()["next_ver"]
+        ver_meta = cur.fetchone()
+        if ver_meta is None:
+            raise HTTPException(status_code=500, detail="Secret version sequence failed")
+        next_ver = ver_meta["next_ver"]
 
         # Encrypt with AAD bound to (path|version)
         plaintext = json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
@@ -194,6 +198,8 @@ def put_secret(
             (item_id, next_ver, ct, nonce, created_by),
         )
         ver_row = cur.fetchone()
+        if ver_row is None:
+            raise HTTPException(status_code=500, detail="Secret version insert failed")
 
         # Audit (single execute; keep width by splitting args)
         audit_sql = (

@@ -4,7 +4,7 @@
 import hashlib
 import json
 import os
-from typing import Any
+from typing import Any, Tuple
 
 from fastapi import (
     APIRouter,
@@ -16,7 +16,8 @@ from fastapi import (
     Query,
     UploadFile,
 )
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response
+from psycopg import Cursor
 from psycopg.rows import dict_row
 from psycopg.types.json import Json
 
@@ -75,7 +76,7 @@ def _config_row_to_dict(path: str, row: dict[str, Any]) -> dict[str, Any]:
     return base
 
 
-def _fetch_current_config(cur, path: str, app_id: str) -> dict[str, Any] | None:
+def _fetch_current_config(cur: Cursor[Any], path: str, app_id: str) -> dict[str, Any] | None:
     """Fetch the current config row (with optional file metadata)."""
     cur.execute(
         """
@@ -167,6 +168,8 @@ def put_config(
             (Json(value), checksum, created_by, path, app_id),
         )
         row = cur.fetchone()
+        if row is None:
+            raise HTTPException(status_code=500, detail="Config insert failed")
 
         actor_subject = _actor_subject(x_actor_subject, _principal)
 
@@ -265,6 +268,8 @@ async def put_config_file(
             (checksum, created_by, path, app_id),
         )
         ver_row = cur.fetchone()
+        if ver_row is None:
+            raise HTTPException(status_code=500, detail="Config file version insert failed")
 
         cur.execute(
             """
@@ -323,7 +328,7 @@ def download_config_file(
 
     if version is None:
         version_clause = "cv.is_current"
-        params = (path, app_id)
+        params: Tuple[Any, ...] = (path, app_id)
     else:
         version_clause = "cv.version = %s"
         params = (path, app_id, version)
@@ -354,8 +359,4 @@ def download_config_file(
     filename = row["file_name"] or f"{path.replace('/', '_')}"
     headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
 
-    return StreamingResponse(
-        content=bytes(row["file_data"]),
-        media_type=content_type,
-        headers=headers,
-    )
+    return Response(content=bytes(row["file_data"]), media_type=content_type, headers=headers)
