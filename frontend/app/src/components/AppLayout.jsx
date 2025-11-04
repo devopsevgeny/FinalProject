@@ -15,8 +15,14 @@ export default function AppLayout() {
   const session = getSession()
   const location = useLocation()
   const navigate = useNavigate()
+  const hasSession = Boolean(session?.token)
 
-  if (!session?.token) {
+  useEffect(() => {
+    if (!hasSession) return
+    logInfo('nav.location', { path: location.pathname })
+  }, [hasSession, location.pathname])
+
+  if (!hasSession) {
     return <Navigate to="/" replace state={{ from: location }} />
   }
 
@@ -28,10 +34,6 @@ export default function AppLayout() {
     user?.email ||
     user?.id ||
     'Operator'
-
-  useEffect(() => {
-    logInfo('nav.location', { path: location.pathname })
-  }, [location.pathname])
 
   const logout = () => {
     clearSession()

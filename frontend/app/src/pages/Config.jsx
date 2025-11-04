@@ -100,7 +100,7 @@ export default function ConfigPage() {
     let parsed
     try {
       parsed = JSON.parse(json)
-    } catch (_parseError) {
+    } catch {
       setErr('Config body must be valid JSON.')
       return
     }
