@@ -42,7 +42,7 @@ jobs:
         uses: errata-ai/vale-action@v2
         with:
           files: 'docs README.md'
-          config: '.vale.ini'
+          vale_flags: '--config=.vale.ini'
 
   build-backend:
     runs-on: ubuntu-latest
