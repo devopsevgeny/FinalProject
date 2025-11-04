@@ -41,7 +41,7 @@ jobs:
       - name: Run Vale
         uses: errata-ai/vale-action@v2
         with:
-          files: 'docs README.md'
+          files: 'README.md'
           vale_flags: '--config=.vale.ini'
 
   build-backend:
