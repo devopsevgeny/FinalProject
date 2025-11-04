@@ -146,10 +146,13 @@ def test_put_config_file_upload(mock_pool, mock_ensure_app, client):
     ]
 
     files = {"file": ("cfg.txt", b"hello world", "text/plain")}
-    form = {"app_id": "myapp", "app_name": "My App"}
+    params = [
+        ("app_id", "myapp"),
+        ("app_name", "My App"),
+    ]
     response = client.post(
         f"/config/{path}/file",
-        data=form,
+        data=params,
         files=files,
         headers={"X-Actor-Id": "actor-1", "X-API-Key": "dummy"},
     )
