@@ -1,53 +1,40 @@
 # Configuration manager API documentation
 
-FastAPI-based service for managing configurations and secrets with versioning, encryption, and audit logging.
+The configuration manager is a FastAPI service that stores versioned configuration data and encrypted secrets. It exposes a concise HTTP surface so platform teams can automate deployments while keeping change history and audit trails.
 
-## Authentication
+## Authentication options
 
-Set `AUTH_TYPE` to choose an authentication mode.
+Set the `AUTH_TYPE` environment variable to decide how clients authenticate.
 
-### API key authentication (`AUTH_TYPE=API_KEY`)
+### API key mode
+
+Set `AUTH_TYPE=API_KEY`. Every request must send `X-API-Key: <your key>`.
 
 ```bash
 curl -H "X-API-Key: your-api-key" http://localhost:8080/whoami
 ```
 
-### JSON Web Token bearer authentication (`AUTH_TYPE=BEARER`)
+### Bearer mode with JSON web tokens
+
+Set `AUTH_TYPE=BEARER`. Provide `Authorization: Bearer <jwt>` where the JSON web token—commonly shortened to JWT—is signed with your shared key or key pair.
 
 ```bash
 curl -H "Authorization: Bearer your.jwt.token" http://localhost:8080/whoami
 ```
 
-## Health check endpoints
+## Health verification endpoints
 
-### Get /health endpoint
+Automation can poll these endpoints to confirm availability.
 
-Verifies service and database health.
+- **GET /health**: returns service status and a database round-trip timestamp.
+- **GET /healthz**: exposes a Kubernetes-ready probe.
 
-```bash
-curl http://localhost:8080/health
-```
+## Identity endpoint
 
-### Get /healthz endpoint
-
-Exposes a Kubernetes-style health probe.
+Use **GET /whoami** to see how the service interpreted your credentials.
 
 ```bash
-curl http://localhost:8080/healthz
-```
-
-## Authentication information
-
-### Get /whoami endpoint
-
-Returns authenticated principal details.
-
-```bash
-# With API key
 curl -H "X-API-Key: your-api-key" http://localhost:8080/whoami
-
-# With JSON Web Token
-curl -H "Authorization: Bearer your.jwt.token" http://localhost:8080/whoami
 ```
 
 Example response:
@@ -66,151 +53,95 @@ Example response:
 
 ## Configuration endpoints
 
-### Get /config/{path} endpoint
+Configuration items can hold JSON documents or binary files. Every change creates a new version.
 
-Retrieves the current configuration value (JSON data or file metadata).
+- **GET /config/{path}**: returns the current value. JSON payloads appear in the `value` field. File items include filename, size, and media-type metadata.
+- **POST /config/{path}**: accepts a JSON body with `app_id`, optional `app_name`, and `value`.
+- **POST /config/{path}/file**: accepts multipart form data with `file`, `app_id`, and optional `app_name`.
+- **GET /config/{path}/file**: streams the current file, or a specific version when you supply the `version` query parameter.
 
-```bash
-curl -H "X-API-Key: your-api-key" \
-  "http://localhost:8080/config/myapp/settings?appId=myapp"
-```
-
-```json
-{
-  "path": "myapp/settings",
-  "version": 1,
-  "data_type": "json",
-  "value": {"feature": true},
-  "file_name": null,
-  "file_size": null,
-  "created_at": "2025-09-25T12:00:00Z"
-}
-```
-
-### Post /config/{path} endpoint
-
-Creates or updates a JSON configuration document.
+JSON example:
 
 ```bash
 curl -X POST \
      -H "X-API-Key: your-api-key" \
      -H "Content-Type: application/json" \
-     -H "X-Actor-Id: user123" \
-     -d '{"app_id": "myapp", "app_name": "My App", "value": {"feature": true}}' \
-     "http://localhost:8080/config/myapp/settings"
+     -d '{"app_id": "myapp", "value": {"feature": true}}' \
+     http://localhost:8080/config/myapp/settings
 ```
 
-### Post /config/{path}/file endpoint
-
-Uploads a configuration file and stores the binary payload as a versioned blob.
+File upload example:
 
 ```bash
 curl -X POST \
      -H "X-API-Key: your-api-key" \
-     -H "X-Actor-Id: user123" \
      -F app_id=myapp \
-     -F app_name="My App" \
      -F file=@config.yaml \
      http://localhost:8080/config/myapp/settings/file
 ```
 
-### Get /config/{path}/file endpoint
-
-Downloads the current or specific file-backed configuration.
-
-```bash
-# Current version
-curl -OJ -H "X-API-Key: your-api-key" \
-  "http://localhost:8080/config/myapp/settings/file?appId=myapp"
-
-# Specific version
-curl -OJ -H "X-API-Key: your-api-key" \
-  "http://localhost:8080/config/myapp/settings/file?appId=myapp&version=3"
-```
-
 ## Secret endpoints
 
-### Get /secret/{path} endpoint
+Secrets are stored as JSON values that the service encrypts before persistence.
 
-Retrieves the decrypted secret value.
-
-```bash
-# Current version
-curl -H "X-API-Key: your-api-key" http://localhost:8080/secret/myapp/api-key
-
-# Specific version
-curl -H "X-API-Key: your-api-key" http://localhost:8080/secret/myapp/api-key?version=2
-```
-
-```json
-{
-  "path": "myapp/api-key",
-  "version": 1,
-  "value": {"key": "secret-value"},
-  "created_at": "2025-09-25T12:00:00Z"
-}
-```
-
-### Post /secret/{path} endpoint
-
-Creates or updates an encrypted secret.
+- **GET /secret/{path}**: returns the decrypted payload for the current version, or a specific version with `?version=<n>`.
+- **POST /secret/{path}**: accepts a JSON body with `app_id`, optional `app_name`, and `value` holding a key/value map.
 
 ```bash
 curl -X POST \
      -H "X-API-Key: your-api-key" \
      -H "Content-Type: application/json" \
-     -H "X-Actor-Id: user123" \
-     -d '{"app_id": "myapp", "app_name": "My App", "value": {"key": "secret-value"}}' \
+     -d '{"app_id": "myapp", "value": {"token": "secret"}}' \
      http://localhost:8080/secret/myapp/api-key
 ```
 
-## Path format
+## Path rules
 
-Paths must follow these rules:
+Paths must:
 
 - Contain letters, numbers, dots, underscores, or hyphens
 - Use forward slashes between segments
 - Avoid trailing slashes
-- Examples: `myapp/settings`, `service/api-key`, `auth.credentials`
 
-## Audit trail
+Examples: `myapp/settings`, `service/api-key`, `auth.credentials`.
 
-All write operations are logged with:
+## Audit logging
 
-- Actor ID (from the `X-Actor-Id` header or authentication principal)
-- Actor subject (from the `X-Actor-Subject` header or JSON Web Token)
-- Operation type
-- Target path
-- Version metadata
+All write operations record:
+
+- Actor ID from the `X-Actor-Id` header or the authenticated principal
+- Actor subject from the `X-Actor-Subject` header or token claims
+- Operation type (`config.put`, `secret.put`, and so on)
+- Target path and resulting version metadata
 
 ## Environment variables
 
 ```bash
 # Authentication
-export AUTH_TYPE=API_KEY           # or BEARER
-export API_KEY=your-secret-key     # used for API key mode
-export JWT_SIGNING_KEY=secret      # signing key for JSON Web Token mode
+export AUTH_TYPE=API_KEY            # or BEARER
+export API_KEY=your-secret-key      # used for API key mode
+export JWT_SIGNING_KEY=secret       # signing key for JWT mode
 export JWT_AUDIENCE=confmgr
 export ISSUER=your-issuer
 
 # Cross-origin resource sharing
 export CORS_ORIGINS=http://localhost:3000,https://app.example.com
 
-# Config file uploads
-export CONFIG_FILE_MAX_BYTES=5242880            # 5 MiB default
+# Configuration file uploads
+export CONFIG_FILE_MAX_BYTES=5242880             # 5 MiB default
 export CONFIG_FILE_ALLOWED_PREFIXES=application/,text/,image/svg+xml
 ```
 
 ## Security features
 
 1. Path validation prevents traversal attacks.
-2. Advanced Encryption Standard (AES) in Galois/Counter Mode (GCM) protects secrets.
-3. Version binding enforces ciphertext integrity.
-4. Secure Hash Algorithm (SHA-256) ensures configuration payload integrity.
-5. File uploads are constrained by size and a media-type allow-list.
-6. Optimistic locking guarantees atomic updates.
-7. Comprehensive audit logging records every change.
-8. Cross-origin resource sharing (CORS) protection enforces explicit origins.
+2. Advanced Encryption Standard in Galois/Counter Mode protects secrets; the mode is known as AES-GCM.
+3. Version binding keeps encrypted payloads aligned with their metadata.
+4. Secure Hash Algorithm 2 confirms payload integrity; the service stores SHA-256 digests.
+5. File uploads obey a size and media-type allow-list.
+6. Optimistic locking keeps updates atomic.
+7. Comprehensive audit logging captures every change.
+8. Cross-origin resource sharing protection enforces explicit origins.
 
 ## Error responses
 
