@@ -28,7 +28,7 @@ def client():
 @patch("app.routes.secrets.pool")
 def test_put_secret_success(mock_pool, mock_seal, mock_ensure_app, client):
     path = "service/api"
-    payload = {"value": {"foo": "bar"}}
+    payload = {"app_id": "service", "value": {"foo": "bar"}}
     actor_id = "11111111-1111-1111-1111-111111111111"
     nonce = b"nonce"
     ciphertext = b"ciphertext"
@@ -68,7 +68,7 @@ def test_put_secret_success(mock_pool, mock_seal, mock_ensure_app, client):
 @patch("app.routes.secrets.pool")
 def test_put_secret_parent_item_missing(mock_pool, mock_seal, mock_ensure_app, client):
     path = "service/api"
-    payload = {"value": {"foo": "bar"}}
+    payload = {"app_id": "service", "value": {"foo": "bar"}}
     mock_ensure_app.side_effect = lambda *args, **kwargs: None
 
     mock_conn = MagicMock()
@@ -146,7 +146,7 @@ def test_put_config_file_upload(mock_pool, mock_ensure_app, client):
     ]
 
     files = {"file": ("cfg.txt", b"hello world", "text/plain")}
-    form = {"app_id": "myapp", "app_name": "My App"}
+    form = {"appId": "myapp", "appName": "My App"}
     response = client.post(
         f"/config/{path}/file",
         data=form,
