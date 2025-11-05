@@ -57,7 +57,7 @@ Configuration items can hold JSON documents or binary files. Every change create
 
 - **GET /config/{path}**: returns the current value. JSON payloads appear in the `value` field. File items include filename, size, and media-type metadata.
 - **POST /config/{path}**: accepts a JSON body with `app_id`, optional `app_name`, and `value`.
-- **POST /config/{path}/file**: accepts multipart form data with `file`, `app_id`, and optional `app_name`.
+- **POST /config/{path}/file**: accepts multipart form data with `file`, `app_id` (or `appId`), and optional `app_name` (`appName`).
 - **GET /config/{path}/file**: streams the current file, or a specific version when you supply the `version` query parameter.
 
 JSON example:

@@ -122,8 +122,8 @@ def test_put_config_file_upload(mock_pool, mock_ensure_app, client):
     ]
     
     data = {
-        "appId": "myapp",
-        "appName": "My App",
+        "app_id": "myapp",
+        "app_name": "My App",
     }
 
     files = {

@@ -204,8 +204,10 @@ def put_config(
 async def put_config_file(
     path: str,
     file: UploadFile = File(...),
-    app_id: str = Form(default="default", alias="appId"),
-    app_name: str | None = Form(default=None, alias="appName"),
+    app_id_camel: str | None = Form(default=None, alias="appId"),
+    app_id_snake: str | None = Form(default=None, alias="app_id"),
+    app_name_camel: str | None = Form(default=None, alias="appName"),
+    app_name_snake: str | None = Form(default=None, alias="app_name"),
     mime: str | None = Form(default=None),
     x_actor_id: str | None = Header(default=None, alias="X-Actor-Id"),
     x_actor_subject: str | None = Header(default=None, alias="X-Actor-Subject"),
@@ -213,8 +215,12 @@ async def put_config_file(
 ):
     """Upload a file-backed config item (AES-GCM at rest)."""
     path = normalize_path(path)
-    app_id = (app_id or "default").strip() or "default"
-    app_name = (app_name or "").strip() or None
+    app_id_raw = app_id_camel if app_id_camel is not None else app_id_snake
+    app_id = (app_id_raw or "default").strip() or "default"
+    app_name_raw = (
+        app_name_camel if app_name_camel is not None else app_name_snake
+    )
+    app_name = (app_name_raw or "").strip() or None
 
     data = await file.read()
     if not data:
