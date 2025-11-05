@@ -146,7 +146,11 @@ def test_put_config_file_upload(mock_pool, mock_ensure_app, client):
     ]
 
     files = {"file": ("cfg.txt", b"hello world", "text/plain")}
-    form = {"app_id": "myapp", "app_name": "My App"}
+    params = [
+        ("app_id", "myapp"),
+        ("app_name", "My App"),
+        ("mime", "text/plain"),
+    ]
     response = client.post(
         f"/config/{path}/file",
         data=params,
