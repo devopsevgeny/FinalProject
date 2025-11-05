@@ -3,10 +3,21 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+pytest.importorskip(
+    "httpx",
+    reason=(
+        "fastapi.testclient depends on httpx; install backend dev deps with "
+        "`pip install -r backend/requirements-dev.txt`"
+    ),
+)
+
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.auth_mode import AUTH_DEP
 from app.main import app
+from app.security.auth import AuthPrincipal, SYSTEM_PRINCIPAL_ID, resolve_created_by
 
 
 @pytest.fixture(autouse=True)
@@ -22,7 +33,39 @@ def client():
     return TestClient(app)
 
 
-@patch("app.routes.secrets.resolve_created_by", lambda *_: "actor-1")
+def test_resolve_created_by_rejects_invalid_header():
+    with pytest.raises(HTTPException) as exc:
+        resolve_created_by(None, "not-a-uuid")
+    assert exc.value.status_code == 400
+
+
+def test_resolve_created_by_falls_back_to_system_uuid():
+    assert resolve_created_by(None, None) == SYSTEM_PRINCIPAL_ID
+
+
+def test_resolve_created_by_uses_principal_uuid_when_available():
+    principal = AuthPrincipal(id="22222222-2222-2222-2222-222222222222")
+    assert resolve_created_by(principal, None) == "22222222-2222-2222-2222-222222222222"
+
+
+def test_resolve_created_by_ignores_non_uuid_principal():
+    principal = AuthPrincipal(id="api-key")
+    assert resolve_created_by(principal, None) == SYSTEM_PRINCIPAL_ID
+
+
+def test_get_config_invalid_path_returns_400(client):
+    response = client.get("/config/bad path")
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid path"
+
+
+def test_get_secret_invalid_path_returns_400(client):
+    response = client.get("/secret/bad path")
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid path"
+
+
+@patch("app.routes.secrets.resolve_created_by", lambda *_: "11111111-1111-1111-1111-111111111111")
 @patch("app.routes.secrets.ensure_app")
 @patch("app.routes.secrets.seal")
 @patch("app.routes.secrets.pool")
@@ -62,7 +105,7 @@ def test_put_secret_success(mock_pool, mock_seal, mock_ensure_app, client):
     assert data["created_at"] == now.isoformat()
 
 
-@patch("app.routes.secrets.resolve_created_by", lambda *_: "actor-1")
+@patch("app.routes.secrets.resolve_created_by", lambda *_: "11111111-1111-1111-1111-111111111111")
 @patch("app.routes.secrets.ensure_app")
 @patch("app.routes.secrets.seal")
 @patch("app.routes.secrets.pool")
@@ -91,7 +134,7 @@ def test_put_secret_parent_item_missing(mock_pool, mock_seal, mock_ensure_app, c
     assert response.json()["detail"] == "Secret item not created"
 
 
-@patch("app.routes.config.resolve_created_by", lambda *_: "actor-1")
+@patch("app.routes.config.resolve_created_by", lambda *_: "11111111-1111-1111-1111-111111111111")
 @patch("app.routes.config.ensure_app")
 @patch("app.routes.config.pool")
 def test_put_config_file_upload(mock_pool, mock_ensure_app, client):
@@ -112,8 +155,8 @@ def test_put_config_file_upload(mock_pool, mock_ensure_app, client):
     
     # Fix 1: Use dict for form data
     data = {
-        "app_id": "myapp",
-        "app_name": "My App",
+        "appId": "myapp",
+        "appName": "My App",
     }
     
     # Fix 2: Proper file tuple format
@@ -126,7 +169,7 @@ def test_put_config_file_upload(mock_pool, mock_ensure_app, client):
         f"/config/{path}/file",
         data=data,  # Changed from params list
         files=files,
-        headers={"X-Actor-Id": "actor-1", "X-API-Key": "dummy"},
+        headers={"X-Actor-Id": "11111111-1111-1111-1111-111111111111", "X-API-Key": "dummy"},
     )
     
     # Add helpful error message

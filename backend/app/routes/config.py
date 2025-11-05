@@ -41,6 +41,14 @@ ALLOWED_FILE_MIME_PREFIXES = tuple(
 )
 
 
+def _normalize_path_or_400(path: str) -> str:
+    """Normalize config path or raise HTTP 400 when invalid."""
+    try:
+        return normalize_path(path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 def _actor_subject(
     explicit_subject: str | None,
     principal: AuthPrincipal | None,
@@ -110,7 +118,7 @@ def get_config(
     _principal: AuthPrincipal = Depends(AUTH_DEP),
 ):
     """Return the current version of a config value (JSON or file metadata)."""
-    path = normalize_path(path)
+    path = _normalize_path_or_400(path)
     app_id = app_id.strip() or "default"
     with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
         row = _fetch_current_config(cur, path, app_id)
@@ -119,102 +127,25 @@ def get_config(
         return _config_row_to_dict(path, row)
 
 
-@router.post("/{path:path}", response_model=ConfigOut, status_code=201)
-def put_config(
-    path: str,
-    payload: PutConfigIn,
-    x_actor_id: str | None = Header(default=None, alias="X-Actor-Id"),
-    x_actor_subject: str | None = Header(default=None, alias="X-Actor-Subject"),
-    _principal: AuthPrincipal = Depends(AUTH_DEP),
-):
-    """Insert a new JSON config version if changed; audit every write."""
-    path = normalize_path(path)
-    value = payload.value
-    app_id = (payload.app_id or "default").strip() or "default"
-    app_name = (payload.app_name or "").strip() or None
-
-    value_canon = json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
-    checksum = hashlib.sha256(value_canon).digest()
-    created_by = resolve_created_by(_principal, x_actor_id)
-
-    with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
-        ensure_app(cur, app_id, app_name)
-        cur.execute("select app_name from core.apps where app_id = %s", (app_id,))
-        app_row = cur.fetchone()
-        app_display_name = app_row["app_name"] if app_row else app_id
-
-        cur.execute(
-            """
-            insert into core.config_items(path, app_id, created_by)
-            values (%s, %s, %s)
-            on conflict(app_id, path) do nothing
-            """,
-            (path, app_id, created_by),
-        )
-
-        current = _fetch_current_config(cur, path, app_id)
-        if current and current["data_type"] == "json" and current["checksum"] == checksum:
-            return _config_row_to_dict(path, current)
-
-        cur.execute(
-            """
-            insert into core.config_versions
-                (item_id, version, is_current, data_type, value_json, checksum, created_by)
-            select id, null, true, 'json', %s::jsonb, %s::bytea, %s
-            from core.config_items
-            where path = %s and app_id = %s
-            returning id, version, created_at
-            """,
-            (Json(value), checksum, created_by, path, app_id),
-        )
-        row = cur.fetchone()
-        if row is None:
-            raise HTTPException(status_code=500, detail="Config insert failed")
-
-        actor_subject = _actor_subject(x_actor_subject, _principal)
-
-        cur.execute(
-            "select audit.log_event(%s::uuid, %s::text, %s::text, %s::text, %s::jsonb)",
-            (
-                created_by,
-                actor_subject,
-                "config.put",
-                path,
-                Json({"version": row["version"], "data_type": "json"}),
-            ),
-        )
-
-        conn.commit()
-
-    return {
-        "app_id": app_id,
-        "app_name": app_display_name,
-        "path": path,
-        "version": row["version"],
-        "data_type": "json",
-        "value": value,
-        "file_name": None,
-        "content_type": None,
-        "file_size": None,
-        "created_at": row["created_at"].isoformat(),
-    }
-
-
 @router.post("/{path:path}/file", response_model=ConfigOut, status_code=201)
 async def put_config_file(
     path: str,
     file: UploadFile = File(...),
-    app_id: str = Form(default="default", alias="appId"),
-    app_name: str | None = Form(default=None, alias="appName"),
+    app_id_camel: str | None = Form(default=None, alias="appId"),
+    app_id_snake: str | None = Form(default=None, alias="app_id"),
+    app_name_camel: str | None = Form(default=None, alias="appName"),
+    app_name_snake: str | None = Form(default=None, alias="app_name"),
     mime: str | None = Form(default=None),
     x_actor_id: str | None = Header(default=None, alias="X-Actor-Id"),
     x_actor_subject: str | None = Header(default=None, alias="X-Actor-Subject"),
     _principal: AuthPrincipal = Depends(AUTH_DEP),
 ):
     """Upload a file-backed config item (AES-GCM at rest)."""
-    path = normalize_path(path)
-    app_id = (app_id or "default").strip() or "default"
-    app_name = (app_name or "").strip() or None
+    path = _normalize_path_or_400(path)
+    app_id_raw = app_id_camel if app_id_camel is not None else app_id_snake
+    app_id = (app_id_raw or "default").strip() or "default"
+    app_name_raw = app_name_camel if app_name_camel is not None else app_name_snake
+    app_name = (app_name_raw or "").strip() or None
 
     data = await file.read()
     if not data:
@@ -315,6 +246,87 @@ async def put_config_file(
     }
 
 
+@router.post("/{path:path}", response_model=ConfigOut, status_code=201)
+def put_config(
+    path: str,
+    payload: PutConfigIn,
+    x_actor_id: str | None = Header(default=None, alias="X-Actor-Id"),
+    x_actor_subject: str | None = Header(default=None, alias="X-Actor-Subject"),
+    _principal: AuthPrincipal = Depends(AUTH_DEP),
+):
+    """Insert a new JSON config version if changed; audit every write."""
+    path = _normalize_path_or_400(path)
+    value = payload.value
+    app_id = (payload.app_id or "default").strip() or "default"
+    app_name = (payload.app_name or "").strip() or None
+
+    value_canon = json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
+    checksum = hashlib.sha256(value_canon).digest()
+    created_by = resolve_created_by(_principal, x_actor_id)
+
+    with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+        ensure_app(cur, app_id, app_name)
+        cur.execute("select app_name from core.apps where app_id = %s", (app_id,))
+        app_row = cur.fetchone()
+        app_display_name = app_row["app_name"] if app_row else app_id
+
+        cur.execute(
+            """
+            insert into core.config_items(path, app_id, created_by)
+            values (%s, %s, %s)
+            on conflict(app_id, path) do nothing
+            """,
+            (path, app_id, created_by),
+        )
+
+        current = _fetch_current_config(cur, path, app_id)
+        if current and current["data_type"] == "json" and current["checksum"] == checksum:
+            return _config_row_to_dict(path, current)
+
+        cur.execute(
+            """
+            insert into core.config_versions
+                (item_id, version, is_current, data_type, value_json, checksum, created_by)
+            select id, null, true, 'json', %s::jsonb, %s::bytea, %s
+            from core.config_items
+            where path = %s and app_id = %s
+            returning id, version, created_at
+            """,
+            (Json(value), checksum, created_by, path, app_id),
+        )
+        row = cur.fetchone()
+        if row is None:
+            raise HTTPException(status_code=500, detail="Config insert failed")
+
+        actor_subject = _actor_subject(x_actor_subject, _principal)
+
+        cur.execute(
+            "select audit.log_event(%s::uuid, %s::text, %s::text, %s::text, %s::jsonb)",
+            (
+                created_by,
+                actor_subject,
+                "config.put",
+                path,
+                Json({"version": row["version"], "data_type": "json"}),
+            ),
+        )
+
+        conn.commit()
+
+    return {
+        "app_id": app_id,
+        "app_name": app_display_name,
+        "path": path,
+        "version": row["version"],
+        "data_type": "json",
+        "value": value,
+        "file_name": None,
+        "content_type": None,
+        "file_size": None,
+        "created_at": row["created_at"].isoformat(),
+    }
+
+
 @router.get("/{path:path}/file")
 def download_config_file(
     path: str,
@@ -323,7 +335,7 @@ def download_config_file(
     _principal: AuthPrincipal = Depends(AUTH_DEP),
 ):
     """Stream back the stored file for the given config path/version."""
-    path = normalize_path(path)
+    path = _normalize_path_or_400(path)
     app_id = app_id.strip() or "default"
 
     if version is None:

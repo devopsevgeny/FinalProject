@@ -19,6 +19,14 @@ from app.utils.apps import ensure_app
 router = APIRouter(prefix="/secret", tags=["secrets"])
 
 
+def _normalize_path_or_400(path: str) -> str:
+    """Normalize secret path or raise HTTP 400 when invalid."""
+    try:
+        return normalize_path(path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 def _decrypt_secret(path: str, row: Dict[str, Any]) -> Dict[str, Any]:
     if row["alg"] != "AES256-GCM":
         raise HTTPException(status_code=500, detail="Unsupported algorithm")
@@ -100,7 +108,7 @@ def get_secret(
     _principal: AuthPrincipal = Depends(AUTH_DEP),
 ):
     """Fetch and decrypt secret; if version omitted, use current."""
-    path = normalize_path(path)
+    path = _normalize_path_or_400(path)
     app_id = app_id.strip() or "default"
     if version is None:
         sql = """
@@ -139,7 +147,7 @@ def put_secret(
     _principal: AuthPrincipal = Depends(AUTH_DEP),
 ):
     """Insert/update secret with AES-GCM encryption and audit."""
-    path = normalize_path(path)
+    path = _normalize_path_or_400(path)
     value = payload.value
     app_id = (payload.app_id or "default").strip() or "default"
     app_name = (payload.app_name or "").strip() or None

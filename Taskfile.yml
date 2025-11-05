@@ -61,8 +61,12 @@ tasks:
       - task: clean
       - task: build-nocache
       - task: up
+
+  backend-test:
+    desc: Run backend pytest suite with variables from .env.test
+    cmds:
+      - bash -lc 'set -a && . .env.test && set +a && pytest backend/tests'
   logs:
     desc: Follow docker compose logs
     cmds:
       - '{{.COMPOSE}} logs -f'
-

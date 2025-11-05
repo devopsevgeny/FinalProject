@@ -57,7 +57,7 @@ Configuration items can hold JSON documents or binary files. Every change create
 
 - **GET /config/{path}**: returns the current value. JSON payloads appear in the `value` field. File items include filename, size, and media-type metadata.
 - **POST /config/{path}**: accepts a JSON body with `app_id`, optional `app_name`, and `value`.
-- **POST /config/{path}/file**: accepts multipart form data with `file`, `app_id`, and optional `app_name`.
+- **POST /config/{path}/file**: accepts multipart form data with `file`, `app_id` (or `appId`), and optional `app_name` (`appName`).
 - **GET /config/{path}/file**: streams the current file, or a specific version when you supply the `version` query parameter.
 
 JSON example:
@@ -157,3 +157,17 @@ Common status codes:
 - 401: authentication failed
 - 404: configuration or secret not found
 - 500: internal server error
+
+## Running backend tests
+
+Install the backend development requirements before running pytest so optional
+dependencies—such as `httpx`, which FastAPI's `TestClient` imports at runtime—are
+available:
+
+```bash
+pip install -r backend/requirements-dev.txt
+pytest backend/tests
+```
+
+If `httpx` is absent the endpoint test module is skipped with a reminder about
+the command above.

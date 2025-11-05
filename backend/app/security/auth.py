@@ -5,6 +5,7 @@ import logging
 import re
 from dataclasses import dataclass
 from typing import Optional, Any, Dict, NoReturn
+from uuid import UUID
 
 from fastapi import Header, HTTPException
 import jwt  # PyJWT
@@ -14,10 +15,15 @@ logger = logging.getLogger(__name__)
 AUTH_TYPE = os.getenv("AUTH_TYPE", "API_KEY").strip().upper()
 API_KEY = os.getenv("API_KEY", "")
 
-JWT_ALG = os.getenv("JWT_ALG", "HS256")
+JWT_ALG = os.getenv("JWT_ALG", "HS256").strip().upper()
 JWT_SIGNING_KEY = os.getenv("JWT_SIGNING_KEY", "")
+JWT_PUBLIC_KEY = os.getenv("JWT_PUBLIC_KEY", "")
+JWT_PRIVATE_KEY = os.getenv("JWT_PRIVATE_KEY", "")
 JWT_AUDIENCE = os.getenv("JWT_AUDIENCE", "confmgr")
 ISSUER = os.getenv("ISSUER", "")
+
+_DEFAULT_SYSTEM_PRINCIPAL_ID = "00000000-0000-0000-0000-000000000001"
+SYSTEM_PRINCIPAL_ID = os.getenv("SYSTEM_PRINCIPAL_ID", _DEFAULT_SYSTEM_PRINCIPAL_ID)
 
 
 @dataclass
@@ -76,6 +82,37 @@ def _unique(xs: list[str]) -> list[str]:
     return out
 
 
+def _read_key_material(value_or_path: str | None) -> str:
+    """Return key contents whether provided directly or via file path."""
+    if not value_or_path:
+        return ""
+    try:
+        if os.path.exists(value_or_path):
+            with open(value_or_path, "r", encoding="utf-8") as handle:
+                return handle.read()
+    except OSError:
+        # Fall back to treating the value as inline key material.
+        pass
+    return value_or_path
+
+
+def _verification_key() -> str:
+    """Resolve key material appropriate for the configured JWT algorithm."""
+    alg = JWT_ALG or "HS256"
+    if alg.startswith("HS"):
+        key = _read_key_material(JWT_SIGNING_KEY)
+        if not key:
+            _unauth("JWT_SIGNING_KEY not configured")
+        return key
+
+    public_key = _read_key_material(JWT_PUBLIC_KEY)
+    private_key = _read_key_material(JWT_PRIVATE_KEY)
+    key = public_key or private_key
+    if not key:
+        _unauth("JWT_PUBLIC_KEY or JWT_PRIVATE_KEY not configured")
+    return key
+
+
 def _extract_roles(payload: Dict[str, Any]) -> list[str]:
     """Extract roles/groups only (do not mix with 'scope')."""
     roles: list[str] = []
@@ -101,6 +138,16 @@ def _extract_scopes(payload: Dict[str, Any]) -> list[str]:
     return _unique(scopes)
 
 
+def _coerce_uuid(value: str | None) -> str | None:
+    """Return normalized UUID string or None when input is falsy/invalid."""
+    if not value:
+        return None
+    try:
+        return str(UUID(str(value)))
+    except (ValueError, TypeError):
+        return None
+
+
 def _require_bearer(authorization: str | None = Header(default=None, alias="Authorization")) -> AuthPrincipal:
     """Validate a Bearer JWT and build AuthPrincipal with separate roles/scopes."""
     if not authorization:
@@ -115,7 +162,7 @@ def _require_bearer(authorization: str | None = Header(default=None, alias="Auth
     try:
         payload = jwt.decode(
             token,
-            JWT_SIGNING_KEY,
+            _verification_key(),
             algorithms=[JWT_ALG],
             audience=JWT_AUDIENCE,
             issuer=ISSUER,
@@ -150,11 +197,25 @@ require_api_key = _require_api_key
 require_bearer = _require_bearer
 
 
-def resolve_created_by(principal: AuthPrincipal, x_actor_id: str | None) -> str:
+def resolve_created_by(principal: AuthPrincipal | None, x_actor_id: str | None) -> str:
     """Resolve the created_by ID from principal or X-Actor-Id header."""
     if x_actor_id:
-        return x_actor_id
-    return principal.id if principal else "system"
+        normalized = _coerce_uuid(x_actor_id)
+        if not normalized:
+            raise HTTPException(status_code=400, detail="X-Actor-Id must be a valid UUID")
+        return normalized
+
+    if principal:
+        normalized = _coerce_uuid(principal.id)
+        if normalized:
+            return normalized
+
+    fallback = _coerce_uuid(SYSTEM_PRINCIPAL_ID)
+    if fallback:
+        return fallback
+
+    logger.error("SYSTEM_PRINCIPAL_ID is not a valid UUID")
+    raise HTTPException(status_code=500, detail="Server misconfiguration: SYSTEM_PRINCIPAL_ID invalid")
 
 
-__all__ = ["require_api_key", "require_bearer", "AuthPrincipal", "resolve_created_by"]
+__all__ = ["require_api_key", "require_bearer", "AuthPrincipal", "resolve_created_by", "SYSTEM_PRINCIPAL_ID"]

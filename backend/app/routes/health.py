@@ -88,8 +88,10 @@ def _check_auth() -> Tuple[bool, Optional[str]]:
                 if not os.getenv("JWT_SIGNING_KEY"):
                     ok, err = False, "JWT_SIGNING_KEY missing for HS*"
             else:
-                if not os.getenv("JWT_PRIVATE_KEY"):
-                    ok, err = False, "JWT_PRIVATE_KEY missing for RS*/ES*"
+                has_public = os.getenv("JWT_PUBLIC_KEY", "").strip()
+                has_private = os.getenv("JWT_PRIVATE_KEY", "").strip()
+                if not (has_public or has_private):
+                    ok, err = False, "JWT_PUBLIC_KEY or JWT_PRIVATE_KEY missing for RS*/ES*"
             if ok and not os.getenv("JWT_AUDIENCE"):
                 ok, err = False, "JWT_AUDIENCE missing"
             if ok and not os.getenv("ISSUER"):
