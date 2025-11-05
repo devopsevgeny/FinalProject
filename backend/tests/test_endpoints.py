@@ -1,8 +1,19 @@
-# python
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+# FastAPI's TestClient relies on Starlette's optional HTTPX dependency. When HTTPX
+# is not installed we skip the module and point contributors to the dev
+# requirements file that installs it.
+pytest.importorskip(
+    "httpx",
+    reason=(
+        "fastapi.testclient requires httpx; install backend test extras with "
+        "`pip install -r backend/requirements-dev.txt`"
+    ),
+)
+
 from fastapi.testclient import TestClient
 
 from app.auth_mode import AUTH_DEP
@@ -110,30 +121,30 @@ def test_put_config_file_upload(mock_pool, mock_ensure_app, client):
         {"id": 101, "version": 5, "created_at": now},
     ]
     
-    # Fix 1: Use dict for form data
     data = {
-        "app_id": "myapp",
-        "app_name": "My App",
+        "appId": "myapp",
+        "appName": "My App",
     }
-    
-    # Fix 2: Proper file tuple format
+
     files = {
         "file": ("cfg.txt", b"hello world", "text/plain")
     }
-    
-    # Fix 3: Add debug output
+
     response = client.post(
         f"/config/{path}/file",
-        data=data,  # Changed from params list
+        data=data,
         files=files,
         headers={"X-Actor-Id": "actor-1", "X-API-Key": "dummy"},
     )
-    
-    # Add helpful error message
-    if response.status_code != 201:
-        print(f"Error Response: {response.text}")
-        print(f"Status Code: {response.status_code}")
-    
-    assert response.status_code == 201, f"Expected 201, got {response.status_code}: {response.text}"
-    assert response.json()["version"] == 5
-    assert response.json()["path"] == path
+
+    assert response.status_code == 201
+
+    body = response.json()
+    assert body["path"] == path
+    assert body["version"] == 5
+    assert body["app_id"] == "myapp"
+    assert body["app_name"] == "My App"
+    assert body["file_name"] == "cfg.txt"
+    assert body["content_type"] == "text/plain"
+    assert body["file_size"] == len(files["file"][1])
+    assert body["created_at"] == now.isoformat()
