@@ -99,11 +99,11 @@ jobs:
       - name: Prepare environment file
         run: cp .env.test .env
       - name: Build stack
-        run: docker compose build
+        run: docker compose -f docker-compose.yaml -f docker-compose.ci.yaml build
       - name: Start stack
-        run: docker compose up -d
+        run: docker compose -f docker-compose.yaml -f docker-compose.ci.yaml up -d
       - name: Smoke tests
         run: backend/tests/smoke_e2e.sh
       - name: Stop stack
         if: always()
-        run: docker compose down --volumes
+        run: docker compose -f docker-compose.yaml -f docker-compose.ci.yaml down --volumes
