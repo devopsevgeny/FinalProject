@@ -16,7 +16,7 @@ curl -H "X-API-Key: your-api-key" http://localhost:8080/whoami
 
 ### Bearer mode with JSON web tokens
 
-Set `AUTH_TYPE=BEARER`. Provide `Authorization: Bearer <jwt>` where the JSON web token—commonly shortened to JWT—is signed with your shared key or key pair.
+Set `AUTH_TYPE=BEARER`. Provide `Authorization: Bearer <token>` where the JSON Web Token (JWT) is signed with your shared key or key pair.
 
 ```bash
 curl -H "Authorization: Bearer your.jwt.token" http://localhost:8080/whoami
@@ -57,7 +57,7 @@ Configuration items can hold JSON documents or binary files. Every change create
 
 - **GET /config/{path}**: returns the current value. JSON payloads appear in the `value` field. File items include filename, size, and media-type metadata.
 - **POST /config/{path}**: accepts a JSON body with `app_id`, optional `app_name`, and `value`.
-- **POST /config/{path}/file**: accepts multipart form data with `file`, `app_id` (or `appId`), and optional `app_name` (`appName`).
+- **POST /config/{path}/file**: accepts multipart form data with `file`, either `app_id` or `appId`, and optional `app_name`/`appName`.
 - **GET /config/{path}/file**: streams the current file, or a specific version when you supply the `version` query parameter.
 
 JSON example:
@@ -82,7 +82,7 @@ curl -X POST \
 
 ## Secret endpoints
 
-Secrets are stored as JSON values that the service encrypts before persistence.
+The service stores secrets as JSON values and encrypts them before persistence.
 
 - **GET /secret/{path}**: returns the decrypted payload for the current version, or a specific version with `?version=<n>`.
 - **POST /secret/{path}**: accepts a JSON body with `app_id`, optional `app_name`, and `value` holding a key/value map.
@@ -135,9 +135,9 @@ export CONFIG_FILE_ALLOWED_PREFIXES=application/,text/,image/svg+xml
 ## Security features
 
 1. Path validation prevents traversal attacks.
-2. Advanced Encryption Standard in Galois/Counter Mode protects secrets; the mode is known as AES-GCM.
+2. The Advanced Encryption Standard (AES) in Galois/Counter Mode (GCM) protects secrets.
 3. Version binding keeps encrypted payloads aligned with their metadata.
-4. Secure Hash Algorithm 2 confirms payload integrity; the service stores SHA-256 digests.
+4. Secure Hash Algorithm (SHA-256) confirms payload integrity.
 5. File uploads obey a size and media-type allow-list.
 6. Optimistic locking keeps updates atomic.
 7. Comprehensive audit logging captures every change.
@@ -169,5 +169,4 @@ pip install -r backend/requirements-dev.txt
 pytest backend/tests
 ```
 
-If `httpx` is absent the endpoint test module is skipped with a reminder about
-the preceding command.
+If `httpx` is absent, pytest skips the endpoint test module and prints a reminder about the preceding command.
