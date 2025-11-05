@@ -160,7 +160,7 @@ Common status codes:
 
 ## Running backend tests
 
-Install the backend development requirements before running pytest so optional
+Install the backend development requirements before running `pytest` so optional
 dependencies—such as `httpx`, which FastAPI's `TestClient` imports at runtime—are
 available:
 
@@ -170,4 +170,4 @@ pytest backend/tests
 ```
 
 If `httpx` is absent the endpoint test module is skipped with a reminder about
-the command above.
+the preceding command.
