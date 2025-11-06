@@ -52,6 +52,10 @@ ACTOR_SUBJECT="${ACTOR_SUBJECT:-smoke-test}"
 AUTH_TYPE_RAW="${AUTH_TYPE:-API_KEY}"
 AUTH_TYPE="$(trim "$AUTH_TYPE_RAW")"
 AUTH_TYPE_UPPER="$(printf '%s' "$AUTH_TYPE" | tr '[:lower:]' '[:upper:]')"
+WAIT_FOR_READY_TIMEOUT="${WAIT_FOR_READY_TIMEOUT:-90}"
+WAIT_FOR_READY_INTERVAL="${WAIT_FOR_READY_INTERVAL:-2}"
+LOGIN_RETRIES="${LOGIN_RETRIES:-20}"
+LOGIN_RETRY_DELAY="${LOGIN_RETRY_DELAY:-2}"
 
 # auth
 API_KEY="${API_KEY:-}"                  # from .env
@@ -78,17 +82,46 @@ RUN_BEARER="${RUN_BEARER:-0}"
 need() { command -v "$1" >/dev/null 2>&1 || { fail "missing tool: $1"; exit 2; }; }
 need curl; need jq
 
+wait_for_backend() {
+  local deadline=$((SECONDS + WAIT_FOR_READY_TIMEOUT))
+  local attempt=1
+  while (( SECONDS < deadline )); do
+    if curl -fsS "${BASE}/health" >/dev/null 2>&1; then
+      [ "$attempt" -gt 1 ] && ok "Backend became ready after $((attempt-1)) attempts"
+      return 0
+    fi
+    if (( attempt % 5 == 1 )); then
+      printf "${YLW}… waiting for backend readiness at %s${NC}\n" "$(date -u +%H:%M:%S)"
+    fi
+    sleep "$WAIT_FOR_READY_INTERVAL"
+    attempt=$((attempt+1))
+  done
+  fail "Backend not ready at ${BASE}/health within ${WAIT_FOR_READY_TIMEOUT}s"
+  exit 2
+}
+
 # bearer login
 get_token() {
-  TOKEN="$(curl -sS "${BASE}/auth/login" \
-    -H 'Content-Type: application/json' \
-    --data "{\"username\":\"${LOGIN_USER}\",\"password\":\"${LOGIN_PASS}\"}" \
-    | jq -r .access_token)"
-  if [ -z "${TOKEN:-}" ] || [ "${TOKEN}" = "null" ]; then
-    fail "Bearer login failed. Check ${BASE}/auth/login and credentials."
-    exit 2
-  fi
+  local login_json="$TMP/login.json"
+  local attempt=1
+  while (( attempt <= LOGIN_RETRIES )); do
+    if curl -fsS "${BASE}/auth/login" \
+      -H 'Content-Type: application/json' \
+      --data "{\"username\":\"${LOGIN_USER}\",\"password\":\"${LOGIN_PASS}\"}" \
+      -o "$login_json"; then
+      TOKEN="$(jq -r '.access_token // empty' "$login_json" 2>/dev/null || true)"
+      if [ -n "${TOKEN:-}" ] && [ "${TOKEN}" != "null" ]; then
+        return 0
+      fi
+    fi
+    sleep "$LOGIN_RETRY_DELAY"
+    attempt=$((attempt+1))
+  done
+  fail "Bearer login failed after ${LOGIN_RETRIES} attempts. Check ${BASE}/auth/login and credentials."
+  exit 2
 }
+
+wait_for_backend
 [ "$RUN_BEARER" = "1" ] && get_token
 
 mask() { local v="$1"; [ -z "$v" ] && { echo "none"; return; }; echo "${v:0:6}…${v: -4}"; }
