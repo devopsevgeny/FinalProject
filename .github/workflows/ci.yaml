@@ -101,8 +101,12 @@ jobs:
       - name: Prepare environment file
         run: cp .env.test .env
       - name: Generate TLS certs
-        working-directory: certs
-        run: ./generate-certs.sh
+        run: |
+          mkdir -p certs
+          cp scripts/generate_cert.sh certs/
+          chmod +x certs/generate_cert.sh
+          cd certs
+          ./generate_cert.sh -f
       - name: Build stack
         run: docker compose -f docker-compose.yaml -f docker-compose.ci.yaml build
       - name: Start stack
