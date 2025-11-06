@@ -32,11 +32,28 @@ SECRET_PATH="${SECRET_PATH:-service/api}"
 CONFIG_PATH="${CONFIG_PATH:-app/feature-flags}"
 ACTOR_ID="${ACTOR_ID:-$(uuidgen)}"
 ACTOR_SUBJECT="${ACTOR_SUBJECT:-smoke-test}"
+AUTH_TYPE="${AUTH_TYPE:-API_KEY}"
+AUTH_TYPE_UPPER="$(printf '%s' "$AUTH_TYPE" | tr '[:lower:]' '[:upper:]')"
 
 # auth
 API_KEY="${API_KEY:-}"                  # from .env
 LOGIN_USER="${LOGIN_USER:-admin}"
 LOGIN_PASS="${LOGIN_PASS:-admin}"
+if [ -z "${RUN_API_KEY+x}" ]; then
+  if [ "$AUTH_TYPE_UPPER" = "API_KEY" ]; then
+    RUN_API_KEY=1
+  else
+    RUN_API_KEY=0
+  fi
+fi
+if [ -z "${RUN_BEARER+x}" ]; then
+  if [ "$AUTH_TYPE_UPPER" = "BEARER" ]; then
+    RUN_BEARER=1
+  else
+    RUN_BEARER=0
+  fi
+fi
+RUN_API_KEY="${RUN_API_KEY:-0}"
 RUN_BEARER="${RUN_BEARER:-0}"
 
 # tools
@@ -63,6 +80,9 @@ echo "SECRET_PATH=${SECRET_PATH}"
 echo "CONFIG_PATH=${CONFIG_PATH}"
 echo "ACTOR_ID=${ACTOR_ID}"
 echo "ACTOR_SUBJECT=${ACTOR_SUBJECT}"
+echo "AUTH_TYPE=${AUTH_TYPE_UPPER}"
+echo "RUN_API_KEY=${RUN_API_KEY}"
+echo "RUN_BEARER=${RUN_BEARER}"
 echo "API_KEY=<hidden:$(mask "${API_KEY:-}")>"
 echo "TOKEN=<hidden:$(mask "${TOKEN:-}")>"
 sep
@@ -202,15 +222,25 @@ run_sequence() {
 }
 
 # run sequences
-if [ -n "${API_KEY:-}" ]; then
-  bold "Running API_KEY mode"
-  run_sequence "API_KEY"
+if [ "$RUN_API_KEY" = "1" ]; then
+  if [ -n "${API_KEY:-}" ]; then
+    bold "Running API_KEY mode"
+    run_sequence "API_KEY"
+  else
+    printf "${YLW}! API_KEY mode requested but API_KEY not set. Skipping API Key tests.${NC}\n"
+  fi
 else
-  printf "${YLW}! API_KEY not set. Skipping API Key tests.${NC}\n"
+  if [ "$AUTH_TYPE_UPPER" = "BEARER" ]; then
+    printf "${YLW}! API_KEY mode disabled because AUTH_TYPE=BEARER.${NC}\n"
+  elif [ "$AUTH_TYPE_UPPER" = "API_KEY" ]; then
+    printf "${YLW}! API_KEY mode disabled (RUN_API_KEY=0).${NC}\n"
+  fi
 fi
 if [ "$RUN_BEARER" = "1" ]; then
   bold "Running BEARER mode"
   run_sequence "BEARER"
+elif [ "$AUTH_TYPE_UPPER" = "BEARER" ]; then
+  printf "${YLW}! AUTH_TYPE=BEARER but RUN_BEARER=0. Set RUN_BEARER=1 to enable JWT smoke tests.${NC}\n"
 fi
 
 # summary
