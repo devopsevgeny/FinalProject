@@ -102,11 +102,20 @@ jobs:
           shopt -s dotglob nullglob
           contents=("$GITHUB_WORKSPACE"/*)
           if (( ${#contents[@]} )); then
-            sudo rm -rf "${contents[@]}"
+            if command -v sudo >/dev/null && sudo -n true 2>/dev/null; then
+              sudo rm -rf "${contents[@]}"
+            else
+              rm -rf "${contents[@]}"
+            fi
           fi
 
       - name: Fix workspace permissions
-        run: sudo chown -R "$USER":"$USER" "$GITHUB_WORKSPACE" || true
+        run: |
+          if command -v sudo >/dev/null && sudo -n true 2>/dev/null; then
+            sudo chown -R "$USER":"$USER" "$GITHUB_WORKSPACE" || true
+          else
+            chown -R "$USER":"$USER" "$GITHUB_WORKSPACE" || true
+          fi
 
       - uses: actions/checkout@v4
       - name: Cleanup any previous stack
