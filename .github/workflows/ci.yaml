@@ -96,6 +96,8 @@ jobs:
     needs: [build-backend, build-frontend]
     steps:
       - uses: actions/checkout@v4
+      - name: Cleanup any previous stack
+        run: docker compose -f docker-compose.yaml -f docker-compose.ci.yaml down --volumes || true
       - name: Prepare environment file
         run: cp .env.test .env
       - name: Build stack
