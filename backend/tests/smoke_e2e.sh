@@ -8,6 +8,19 @@ bold() { printf "${BOLD}%s${NC}\n" "$*"; }
 sep()  { printf -- "-----------------------------------------------------------------\n"; }
 ok()   { printf "${GREEN}✓ %s${NC}\n" "$*"; }
 fail() { printf "${RED}✗ %s${NC}\n" "$*"; }
+trim() {
+  local s="$1"
+  s="${s#"${s%%[![:space:]]*}"}"   # remove leading space
+  s="${s%"${s##*[![:space:]]}"}"   # remove trailing space
+  printf '%s' "$s"
+}
+clean_env_value() {
+  local val="$1"
+  val="${val%%$'\r'}"              # strip CR
+  val="${val%%[[:space:]]#*}"      # drop inline comments like "  # foo"
+  val="$(trim "$val")"
+  printf '%s' "$val"
+}
 
 TMP="$(mktemp -d)"; cleanup() { rm -rf "$TMP"; }; trap cleanup EXIT
 
@@ -20,7 +33,11 @@ load_env_file() {
   if [ -n "$envfile" ]; then
     while IFS='=' read -r k v; do
       [[ -z "${k:-}" || "$k" =~ ^# ]] && continue
-      if [ -z "${!k:-}" ]; then export "$k"="$v"; fi
+      if [[ "$k" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+        local cleaned
+        cleaned="$(clean_env_value "${v:-}")"
+        if [ -z "${!k:-}" ]; then export "$k"="$cleaned"; fi
+      fi
     done < <(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "$envfile")
   fi
 }
@@ -32,7 +49,8 @@ SECRET_PATH="${SECRET_PATH:-service/api}"
 CONFIG_PATH="${CONFIG_PATH:-app/feature-flags}"
 ACTOR_ID="${ACTOR_ID:-$(uuidgen)}"
 ACTOR_SUBJECT="${ACTOR_SUBJECT:-smoke-test}"
-AUTH_TYPE="${AUTH_TYPE:-API_KEY}"
+AUTH_TYPE_RAW="${AUTH_TYPE:-API_KEY}"
+AUTH_TYPE="$(trim "$AUTH_TYPE_RAW")"
 AUTH_TYPE_UPPER="$(printf '%s' "$AUTH_TYPE" | tr '[:lower:]' '[:upper:]')"
 
 # auth
