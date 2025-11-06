@@ -95,6 +95,9 @@ jobs:
     runs-on: [self-hosted, agent01]
     needs: [build-backend, build-frontend]
     steps:
+      - name: Fix workspace permissions
+        run: sudo chown -R "$USER":"$USER" "$GITHUB_WORKSPACE" || true
+
       - uses: actions/checkout@v4
       - name: Cleanup any previous stack
         run: docker compose -f docker-compose.yaml -f docker-compose.ci.yaml down --volumes || true
