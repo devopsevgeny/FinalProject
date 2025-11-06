@@ -102,24 +102,8 @@ jobs:
           if [ -d "$GITHUB_WORKSPACE" ]; then
             docker run --rm \
               -v "$GITHUB_WORKSPACE":/workspace \
-              python:3.12-alpine \
-              python - <<'PY'
-import os
-import shutil
-
-root = "/workspace"
-for entry in os.listdir(root):
-    path = os.path.join(root, entry)
-    if os.path.isdir(path) and not os.path.islink(path):
-        shutil.rmtree(path, ignore_errors=False)
-    else:
-        try:
-            os.unlink(path)
-        except IsADirectoryError:
-            shutil.rmtree(path, ignore_errors=False)
-        except FileNotFoundError:
-            continue
-PY
+              alpine \
+              sh -c 'set -eu; find /workspace -mindepth 1 -maxdepth 1 -exec rm -rf {} +'
           fi
 
       - name: Fix workspace permissions
