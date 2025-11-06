@@ -92,7 +92,7 @@ jobs:
           path: frontend/app/coverage
 
   smoke:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, agent01]
     needs: [build-backend, build-frontend]
     steps:
       - uses: actions/checkout@v4
