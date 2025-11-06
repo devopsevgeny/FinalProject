@@ -21,6 +21,9 @@ clean_env_value() {
   val="$(trim "$val")"
   printf '%s' "$val"
 }
+urlencode() {
+  jq -nr --arg v "$1" '$v|@uri'
+}
 
 TMP="$(mktemp -d)"; cleanup() { rm -rf "$TMP"; }; trap cleanup EXIT
 
@@ -49,6 +52,10 @@ SECRET_PATH="${SECRET_PATH:-service/api}"
 CONFIG_PATH="${CONFIG_PATH:-app/feature-flags}"
 ACTOR_ID="${ACTOR_ID:-$(uuidgen)}"
 ACTOR_SUBJECT="${ACTOR_SUBJECT:-smoke-test}"
+APP_ID_RAW="${APP_ID:-default}"
+APP_ID="$(trim "$APP_ID_RAW")"
+[ -n "$APP_ID" ] || APP_ID="default"
+APP_NAME="$(trim "${APP_NAME:-}")"
 AUTH_TYPE_RAW="${AUTH_TYPE:-API_KEY}"
 AUTH_TYPE="$(trim "$AUTH_TYPE_RAW")"
 AUTH_TYPE_UPPER="$(printf '%s' "$AUTH_TYPE" | tr '[:lower:]' '[:upper:]')"
@@ -81,6 +88,7 @@ RUN_BEARER="${RUN_BEARER:-0}"
 # tools
 need() { command -v "$1" >/dev/null 2>&1 || { fail "missing tool: $1"; exit 2; }; }
 need curl; need jq
+APP_QUERY="appId=$(urlencode "$APP_ID")"
 
 wait_for_backend() {
   local deadline=$((SECONDS + WAIT_FOR_READY_TIMEOUT))
@@ -131,6 +139,7 @@ echo "SECRET_PATH=${SECRET_PATH}"
 echo "CONFIG_PATH=${CONFIG_PATH}"
 echo "ACTOR_ID=${ACTOR_ID}"
 echo "ACTOR_SUBJECT=${ACTOR_SUBJECT}"
+echo "APP_ID=${APP_ID}"
 echo "AUTH_TYPE=${AUTH_TYPE_UPPER}"
 echo "RUN_API_KEY=${RUN_API_KEY}"
 echo "RUN_BEARER=${RUN_BEARER}"
@@ -187,7 +196,7 @@ select si.path, sv.version, sv.is_current,
        sv.created_at, sv.created_by
 from core.secret_items si
 join core.secret_versions sv on sv.item_id=si.id
-where si.path='${SECRET_PATH}'
+where si.path='${SECRET_PATH}' and si.app_id='${APP_ID}'
 order by sv.version;"
   docker compose exec -T postgres bash -lc \
     "gosu postgres psql -d postgres -X -q -x -c \"${q//$'\n'/ }\""
@@ -208,7 +217,7 @@ select ci.path,
 from core.config_items ci
 join core.config_versions cv on cv.item_id=ci.id
 left join core.config_version_files cf on cf.version_id = cv.id
-where ci.path='${CONFIG_PATH}'
+where ci.path='${CONFIG_PATH}' and ci.app_id='${APP_ID}'
 order by cv.version;"
   docker compose exec -T postgres bash -lc \
     "gosu postgres psql -d postgres -X -q -x -c \"${q//$'\n'/ }\""
@@ -217,6 +226,25 @@ order by cv.version;"
 # shared test sequence
 run_sequence() {
   local mode="$1"
+  local payload_secret_v1 payload_secret_v2 payload_cfg
+  payload_secret_v1="$(jq -n --arg app_id "$APP_ID" --arg password "s3cr3t" --arg app_name "$APP_NAME" '
+    {
+      app_id: $app_id,
+      value: {username: "alice", password: $password}
+    } + (if ($app_name | length) > 0 then {app_name: $app_name} else {} end)
+  ')"
+  payload_secret_v2="$(jq -n --arg app_id "$APP_ID" --arg password "n3wS3cr3t" --arg app_name "$APP_NAME" '
+    {
+      app_id: $app_id,
+      value: {username: "alice", password: $password}
+    } + (if ($app_name | length) > 0 then {app_name: $app_name} else {} end)
+  ')"
+  payload_cfg="$(jq -n --arg app_id "$APP_ID" --arg app_name "$APP_NAME" '
+    {
+      app_id: $app_id,
+      value: {beta_ui: true, limit: 50}
+    } + (if ($app_name | length) > 0 then {app_name: $app_name} else {} end)
+  ')"
 
   step "#1 Health"
   echo "==> GET ${BASE}/health"
@@ -225,7 +253,6 @@ run_sequence() {
   assert_jq '.status=="ok"' "health OK"
 
   step "#2 Create secret v1"
-  local payload_secret_v1='{"value":{"username":"alice","password":"s3cr3t"}}'
   echo "==> POST ${BASE}/secret/${SECRET_PATH}"
   run_http "$mode" POST "${BASE}/secret/${SECRET_PATH}" "$payload_secret_v1"
   assert_status 201
@@ -233,35 +260,33 @@ run_sequence() {
   assert_jq '.version|type=="number"' "version is number"
 
   step "#3 Read current secret"
-  echo "==> GET ${BASE}/secret/${SECRET_PATH}"
-  run_http "$mode" GET "${BASE}/secret/${SECRET_PATH}"
+  echo "==> GET ${BASE}/secret/${SECRET_PATH}?${APP_QUERY}"
+  run_http "$mode" GET "${BASE}/secret/${SECRET_PATH}?${APP_QUERY}"
   assert_status 200
   assert_jq '.value.username=="alice"' "username=alice"
   assert_jq '.value.password=="s3cr3t"' "password=s3cr3t"
 
   step "#4 Rotate secret (create v2)"
-  local payload_secret_v2='{"value":{"username":"alice","password":"n3wS3cr3t"}}'
   echo "==> POST ${BASE}/secret/${SECRET_PATH}"
   run_http "$mode" POST "${BASE}/secret/${SECRET_PATH}" "$payload_secret_v2"
   assert_status 201
   assert_jq '.value.password=="n3wS3cr3t"' "rotated secret ok"
 
   step "#5 Read secret version=1"
-  echo "==> GET ${BASE}/secret/${SECRET_PATH}?version=1"
-  run_http "$mode" GET "${BASE}/secret/${SECRET_PATH}?version=1"
+  echo "==> GET ${BASE}/secret/${SECRET_PATH}?${APP_QUERY}&version=1"
+  run_http "$mode" GET "${BASE}/secret/${SECRET_PATH}?${APP_QUERY}&version=1"
   assert_status 200
   assert_jq '.value.password=="s3cr3t"' "v1 password matches"
 
   step "#6 Create config v1"
-  local payload_cfg='{"value":{"beta_ui":true,"limit":50}}'
   echo "==> POST ${BASE}/config/${CONFIG_PATH}"
   run_http "$mode" POST "${BASE}/config/${CONFIG_PATH}" "$payload_cfg"
   assert_status 201
   assert_jq '.value.beta_ui==true' "config flag set"
 
   step "#7 Read config current"
-  echo "==> GET ${BASE}/config/${CONFIG_PATH}"
-  run_http "$mode" GET "${BASE}/config/${CONFIG_PATH}"
+  echo "==> GET ${BASE}/config/${CONFIG_PATH}?${APP_QUERY}"
+  run_http "$mode" GET "${BASE}/config/${CONFIG_PATH}?${APP_QUERY}"
   assert_status 200
   assert_jq '.value.limit==50' "config limit=50"
 
