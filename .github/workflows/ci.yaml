@@ -95,6 +95,16 @@ jobs:
     runs-on: [self-hosted, agent01]
     needs: [build-backend, build-frontend]
     steps:
+      - name: Clean runner workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s dotglob nullglob
+          contents=("$GITHUB_WORKSPACE"/*)
+          if (( ${#contents[@]} )); then
+            sudo rm -rf "${contents[@]}"
+          fi
+
       - name: Fix workspace permissions
         run: sudo chown -R "$USER":"$USER" "$GITHUB_WORKSPACE" || true
 
