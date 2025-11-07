@@ -1,6 +1,8 @@
 services:
   postgres:
-    image: postgres:16
+    build:
+      context: ./postgres
+    image: namlegief/finalproject:postgres-local
     container_name: pg-confmgr
     user: "0:0"                         # run wrapper as root to chown certs
     env_file:
